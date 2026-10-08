@@ -97,6 +97,6 @@ The dashboard has an AI control area with the same capabilities.
 
 ## Documentation pointers
 
-- Project readme: [README.md](../README.md)
-- Architecture and threat model: [ARCHITECTURE.md](ARCHITECTURE.md)
-- This wiki: [WIKI_HANDOFF.md](WIKI_HANDOFF.md)
+- Project readme: [README.md](https://example.invalid/README.md)
+- Architecture and threat model: [ARCHITECTURE.md](https://example.invalid/ARCHITECTURE.md)
+- This wiki source: [WIKI_HANDOFF.md](https://example.invalid/WIKI_HANDOFF.md)

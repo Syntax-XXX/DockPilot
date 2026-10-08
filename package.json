@@ -2,6 +2,7 @@
   "name": "dockpilot",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Docker, without the guessing.",
   "engines": {
     "node": ">=20.19.0"
@@ -9,7 +10,8 @@
   "workspaces": [
     "apps/api",
     "apps/web",
-    "packages/shared"
+    "packages/shared",
+    "wiki"
   ],
   "scripts": {
     "build:shared": "npm run build --workspace=@dockpilot/shared",
@@ -44,9 +46,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@types/node": "^22.19.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@types/node": "^22.19.0",
     "concurrently": "^9.2.4",
     "eslint": "^9.39.1",
     "globals": "^16.5.0",
@@ -54,5 +56,8 @@
     "tsx": "^4.20.6",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.1"
+  },
+  "dependencies": {
+    "opencode-ai": "^1.18.35"
   }
 }

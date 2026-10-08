@@ -1,4 +1,4 @@
-.vitepress/dist
+dist
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
