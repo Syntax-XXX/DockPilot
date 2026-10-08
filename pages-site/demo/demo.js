@@ -307,10 +307,12 @@
       volumes: ['VOLUME', 'NODE', 'SIZE', 'USED BY'],
       networks: ['NETWORK', 'NODE', 'DRIVER', 'CONTAINERS'],
     }[type];
-    return `${heading('INFRASTRUCTURE', title, explanation, actionButton(type === 'images' ? 'pull-image' : 'resource-info', type === 'images' ? '↓ &nbsp; Pull image' : '＋ &nbsp; Demo action'))}<div class="toolbar"><input class="search resource-search" placeholder="⌕  Filter ${type}..." value="${escapeHtml(search)}"><span class="spacer"></span><span class="metric-note">${data.length} ${type}</span></div><div class="table-card table-scroll"><table><thead><tr>${cols.map((col) => `<th>${col}</th>`).join('')}<th>ACTION</th></tr></thead><tbody>${data
-      .filter((row) => row.join(' ').toLowerCase().includes(search.toLowerCase()))
+    const currentRows = data
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => row.join(' ').toLowerCase().includes(search.toLowerCase()));
+    return `${heading('INFRASTRUCTURE', title, explanation, actionButton(type === 'images' ? 'pull-image' : 'resource-info', type === 'images' ? '↓ &nbsp; Pull image' : '＋ &nbsp; Demo action'))}<div class="toolbar"><input class="search resource-search" placeholder="⌕  Filter ${type}..." value="${escapeHtml(search)}"><span class="spacer"></span><span class="metric-note">${currentRows.length} ${type}</span></div><div class="table-card table-scroll"><table><thead><tr>${cols.map((col) => `<th>${col}</th>`).join('')}<th>ACTION</th></tr></thead><tbody>${currentRows
       .map(
-        (row, index) =>
+        ({ row, index }) =>
           `<tr>${row.map((cell, i) => `<td class="${i === 0 ? 'mono' : ''}">${escapeHtml(cell)}</td>`).join('')}<td><button class="tiny-action" data-resource-action="inspect" data-index="${index}" aria-label="Inspect ${escapeHtml(row[0])}">⌕</button> <button class="tiny-action" data-resource-action="action" data-index="${index}" aria-label="Action on ${escapeHtml(row[0])}">···</button></td></tr>`,
       )
       .join('')}</tbody></table></div>`;
@@ -456,7 +458,10 @@
         },
       );
     } else if (action === 'resource-info')
-      toast('Resource action is available through the demo table buttons.');
+      showModal(
+        'Read-only demo inventory',
+        'This sample resource inventory is available to browse and inspect. No real Docker resource is changed.',
+      );
     else if (action === 'export-events') {
       const blob = new Blob(
         [
@@ -489,7 +494,7 @@
     else if (action === 'security-scan') {
       addEvent(
         'Demo security scan complete',
-        '3 simulated nodes · 0 critical · 2 recommendations',
+        `${state.hosts.length} simulated nodes · 0 critical · 2 recommendations`,
         '⬡',
         'good',
       );
@@ -507,6 +512,10 @@
         'Reset demo',
         () => {
           state = initialState();
+          search = '';
+          containerFilter = 'all';
+          if (state.hiddenBanner) document.querySelector('.demo-banner').hidden = true;
+          document.querySelector('.demo-banner').hidden = false;
           save();
           page = 'overview';
           render();
@@ -514,7 +523,7 @@
         },
       );
     else if (action === 'dismiss-banner') {
-      document.querySelector('.demo-banner').remove();
+      document.querySelector('.demo-banner').hidden = true;
       state.hiddenBanner = true;
       save();
     } else if (action === 'workspace')
@@ -576,7 +585,7 @@
       return;
     }
     if (target.dataset.action) {
-      onAction(target.dataset.action, target);
+      onAction(target.dataset.action);
       return;
     }
     if (target.dataset.node) {
@@ -595,17 +604,26 @@
           'Resource details',
           `${row?.[0] || 'Demo resource'} · ${row?.slice(1).join(' · ') || 'Sample inventory item'}. This detail is simulated.`,
         );
-      else toast(`Demo ${type.slice(0, -1)} menu opened`);
+      else {
+        const actionText =
+          type === 'images'
+            ? 'A simulated image pull is available from the button above.'
+            : type === 'volumes'
+              ? 'Volume data is read-only in this demo; inspect details to review the sample mount.'
+              : 'Network topology is illustrative; no real Docker network is changed.';
+        showModal(`${type[0].toUpperCase()}${type.slice(1)} action`, actionText);
+      }
     }
   });
   content.addEventListener('input', (event) => {
     if (event.target.matches('#container-search,.resource-search,.event-search')) {
       search = event.target.value;
       const pos = event.target.selectionStart;
+      const fieldId = event.target.id;
+      const fieldClass = event.target.classList[0];
       render();
       const replacement =
-        content.querySelector(`#${event.target.id}`) ||
-        content.querySelector(`.${event.target.classList[0]}`);
+        content.querySelector(`#${fieldId}`) || content.querySelector(`.${fieldClass}`);
       replacement?.focus();
       replacement?.setSelectionRange(pos, pos);
     }
@@ -729,7 +747,7 @@
     const target = event.target.closest('[data-action]');
     if (target && !target.closest('#page-content')) onAction(target.dataset.action, target);
   });
-  if (state.hiddenBanner) document.querySelector('.demo-banner')?.remove();
+  if (state.hiddenBanner) document.querySelector('.demo-banner').hidden = true;
   render();
   window.setInterval(() => {
     tickMetrics();
