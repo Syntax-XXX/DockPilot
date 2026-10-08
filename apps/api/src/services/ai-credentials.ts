@@ -201,7 +201,9 @@ export interface DisableAiCredentialInput {
   executor?: DbExecutor;
 }
 
-export async function disableAiCredential(input: DisableAiCredentialInput): Promise<AiCredentialView> {
+export async function disableAiCredential(
+  input: DisableAiCredentialInput,
+): Promise<AiCredentialView> {
   const executor = input.executor ?? db;
   const updated = await executor
     .update(aiCredentials)
@@ -239,7 +241,9 @@ export interface EnableAiCredentialInput {
   executor?: DbExecutor;
 }
 
-export async function enableAiCredential(input: EnableAiCredentialInput): Promise<AiCredentialView> {
+export async function enableAiCredential(
+  input: EnableAiCredentialInput,
+): Promise<AiCredentialView> {
   const executor = input.executor ?? db;
   const updated = await executor
     .update(aiCredentials)
@@ -265,7 +269,9 @@ export interface RotateAiCredentialInput {
   executor?: DbExecutor;
 }
 
-export async function rotateAiCredential(input: RotateAiCredentialInput): Promise<CreateAiCredentialResponse> {
+export async function rotateAiCredential(
+  input: RotateAiCredentialInput,
+): Promise<CreateAiCredentialResponse> {
   const executor = input.executor ?? db;
   const generated = createAiToken();
   const updated = await executor

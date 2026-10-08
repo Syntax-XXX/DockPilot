@@ -250,9 +250,7 @@ export const containers = pgTable(
     created: varchar('created', { length: 32 }),
     labels: jsonb('labels').$type<Record<string, string> | null>(),
     ports: jsonb('ports').$type<unknown[] | null>(),
-    syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' })
-      .notNull()
-      .defaultNow(),
+    syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex('containers_host_container_id_uq').on(table.hostId, table.containerId),

@@ -1,18 +1,17 @@
-import { and, desc, eq, isNull, gte, lte, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db, type DbExecutor } from '../db/index.js';
 import { hosts as hostsTable, containers as containersTable } from '../db/schema.js';
-import { dockerVersion, parseDockerEndpoint, verifyDockerSocket, listContainers } from '../lib/docker.js';
+import {
+  dockerVersion,
+  parseDockerEndpoint,
+  verifyDockerSocket,
+  listContainers,
+} from '../lib/docker.js';
 import { keysetAfter } from '../lib/keyset.js';
 import { decodeCursor, encodeCursor } from '../lib/pagination.js';
-import { conflictError, notFoundError, validationError, internalError } from '../lib/errors.js';
-import { writeAuditEvent } from '../lib/audit.js';
+import { internalError, notFoundError, validationError } from '../lib/errors.js';
 import { randomBytes } from 'node:crypto';
-import type {
-  HostView,
-  CreateHostInput,
-  HostStatus,
-  ContainerView,
-} from '@dockpilot/shared';
+import type { HostView, CreateHostInput, HostStatus, ContainerView } from '@dockpilot/shared';
 
 interface HostRow {
   id: string;
@@ -50,6 +49,22 @@ const hostColumns = {
   updatedAt: hostsTable.updatedAt,
 };
 
+const containerColumns = {
+  id: containersTable.id,
+  organizationId: containersTable.organizationId,
+  hostId: containersTable.hostId,
+  containerId: containersTable.containerId,
+  shortId: containersTable.shortId,
+  name: containersTable.name,
+  image: containersTable.image,
+  state: containersTable.state,
+  status: containersTable.status,
+  created: containersTable.created,
+  labels: containersTable.labels,
+  ports: containersTable.ports,
+  syncedAt: containersTable.syncedAt,
+};
+
 function toHostView(row: HostRow): HostView {
   return {
     id: row.id,
@@ -76,7 +91,9 @@ export interface CreateHostServiceInput extends CreateHostInput {
   executor?: DbExecutor;
 }
 
-export async function createHost(input: CreateHostServiceInput): Promise<{ host: HostView; token: string }> {
+export async function createHost(
+  input: CreateHostServiceInput,
+): Promise<{ host: HostView; token: string }> {
   const executor = input.executor ?? db;
   const endpoint = parseDockerEndpoint(input.endpoint);
   const version = await verifyDockerSocket(endpoint);
@@ -112,7 +129,9 @@ export interface ListHostsInput {
   executor?: DbExecutor;
 }
 
-export async function listHosts(input: ListHostsInput): Promise<{ hosts: HostView[]; nextCursor: string | null }> {
+export async function listHosts(
+  input: ListHostsInput,
+): Promise<{ hosts: HostView[]; nextCursor: string | null }> {
   const executor = input.executor ?? db;
   const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
   if (input.cursor && !cursor) throw validationError('The pagination cursor is not valid.');
@@ -149,10 +168,7 @@ export async function getHost(input: {
     .select(hostColumns)
     .from(hostsTable)
     .where(
-      and(
-        eq(hostsTable.id, input.hostId),
-        eq(hostsTable.organizationId, input.organizationId),
-      ),
+      and(eq(hostsTable.id, input.hostId), eq(hostsTable.organizationId, input.organizationId)),
     )
     .limit(1);
   const row = rows[0];
@@ -194,10 +210,7 @@ export async function updateHost(input: UpdateHostInput): Promise<HostView> {
     .update(hostsTable)
     .set(patch)
     .where(
-      and(
-        eq(hostsTable.id, input.hostId),
-        eq(hostsTable.organizationId, input.organizationId),
-      ),
+      and(eq(hostsTable.id, input.hostId), eq(hostsTable.organizationId, input.organizationId)),
     )
     .returning(hostColumns);
 
@@ -243,10 +256,7 @@ export async function enableHost(input: EnableHostInput): Promise<HostView> {
     .update(hostsTable)
     .set({ status: 'healthy', updatedAt: new Date() })
     .where(
-      and(
-        eq(hostsTable.id, input.hostId),
-        eq(hostsTable.organizationId, input.organizationId),
-      ),
+      and(eq(hostsTable.id, input.hostId), eq(hostsTable.organizationId, input.organizationId)),
     )
     .returning(hostColumns);
 
@@ -267,20 +277,14 @@ export async function removeHost(input: RemoveHostInput): Promise<void> {
     .select({ id: hostsTable.id })
     .from(hostsTable)
     .where(
-      and(
-        eq(hostsTable.id, input.hostId),
-        eq(hostsTable.organizationId, input.organizationId),
-      ),
+      and(eq(hostsTable.id, input.hostId), eq(hostsTable.organizationId, input.organizationId)),
     )
     .limit(1);
   if (!existing[0]) throw notFoundError('The host does not exist.');
   await executor
     .delete(hostsTable)
     .where(
-      and(
-        eq(hostsTable.id, input.hostId),
-        eq(hostsTable.organizationId, input.organizationId),
-      ),
+      and(eq(hostsTable.id, input.hostId), eq(hostsTable.organizationId, input.organizationId)),
     );
 }
 
@@ -295,9 +299,6 @@ export async function refreshHost(input: RefreshHostInput): Promise<HostView> {
   const host = await getHost({ ...input, executor });
 
   const endpoint = parseDockerEndpoint(host.endpoint);
-
-  let status: HostStatus = 'healthy';
-  let lastError: string | null = null;
 
   try {
     await verifyDockerSocket(endpoint);
@@ -315,8 +316,7 @@ export async function refreshHost(input: RefreshHostInput): Promise<HostView> {
       })
       .where(eq(hostsTable.id, host.id));
   } catch (error) {
-    status = 'error';
-    lastError = error instanceof Error ? error.message : 'Docker engine unreachable';
+    const lastError = error instanceof Error ? error.message : 'Docker engine unreachable';
     await executor
       .update(hostsTable)
       .set({
@@ -337,9 +337,11 @@ export interface SyncHostContainersInput {
   executor?: DbExecutor;
 }
 
-export async function syncHostContainers(input: SyncHostContainersInput): Promise<{ synced: number }> {
+export async function syncHostContainers(
+  input: SyncHostContainersInput,
+): Promise<{ synced: number }> {
   const executor = input.executor ?? db;
-  const host = await getHost(input, executor);
+  const host = await getHost({ ...input, executor });
 
   const endpoint = parseDockerEndpoint(host.endpoint);
   const dockerContainers = await listContainers(endpoint, true);
@@ -349,13 +351,16 @@ export async function syncHostContainers(input: SyncHostContainersInput): Promis
     .from(hostsTable)
     .innerJoin(
       containersTable,
-      and(eq(containersTable.hostId, hostsTable.id), eq(containersTable.organizationId, hostsTable.organizationId)),
+      and(
+        eq(containersTable.hostId, hostsTable.id),
+        eq(containersTable.organizationId, hostsTable.organizationId),
+      ),
     )
     .where(eq(hostsTable.id, input.hostId));
 
   const existingMap = new Map(existingContainers.map((c) => [c.containerId, c.id]));
 
-  const newContainers: typeof containersTable.$inferInsert[] = [];
+  const newContainers: (typeof containersTable.$inferInsert)[] = [];
 
   for (const dc of dockerContainers) {
     const existingId = existingMap.get(dc.Id);
@@ -363,19 +368,22 @@ export async function syncHostContainers(input: SyncHostContainersInput): Promis
       existingMap.delete(dc.Id);
       continue;
     }
-    const shortId = dc.Names && dc.Names.length > 0 ? dc.Names[0].slice(1) : null;
+    const firstName = dc.Names[0];
+    const shortId = firstName ? firstName.slice(1) : null;
+    const name = firstName && firstName !== '/' ? firstName : null;
     newContainers.push({
       organizationId: input.organizationId,
       hostId: input.hostId,
       containerId: dc.Id,
-      shortId: shortId?.slice(0, 12) ?? null,
-      name: dc.Name && dc.Name !== '/' ? dc.Name : null,
+      shortId: shortId ? shortId.slice(0, 12) : null,
+      name,
       image: dc.Image,
-      state: dc.State as any,
+      state: dc.State as
+        'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead',
       status: dc.Status,
       created: dc.Created.toString(),
-      labels: dc.Labels ?? null,
-      ports: dc.Ports ?? null,
+      labels: dc.Labels,
+      ports: dc.Ports,
       syncedAt: new Date(),
     });
   }
@@ -386,12 +394,11 @@ export async function syncHostContainers(input: SyncHostContainersInput): Promis
 
   if (existingMap.size > 0) {
     const deletedIds = Array.from(existingMap.values());
-    await executor.delete(containersTable).where(
-      and(
-        eq(containersTable.hostId, input.hostId),
-        inArray(containersTable.id, deletedIds),
-      ),
-    );
+    await executor
+      .delete(containersTable)
+      .where(
+        and(eq(containersTable.hostId, input.hostId), inArray(containersTable.id, deletedIds)),
+      );
   }
 
   return { synced: newContainers.length };
@@ -405,26 +412,15 @@ export interface ListHostContainersInput {
   executor?: DbExecutor;
 }
 
-export async function listHostContainers(input: ListHostContainersInput): Promise<{ containers: ContainerView[]; nextCursor: string | null }> {
+export async function listHostContainers(
+  input: ListHostContainersInput,
+): Promise<{ containers: ContainerView[]; nextCursor: string | null }> {
   const executor = input.executor ?? db;
   const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
   if (input.cursor && !cursor) throw validationError('The pagination cursor is not valid.');
 
   const rows = await executor
-    .select(
-      containersTable.id,
-      containersTable.hostId,
-      containersTable.containerId,
-      containersTable.shortId,
-      containersTable.name,
-      containersTable.image,
-      containersTable.state,
-      containersTable.status,
-      containersTable.created,
-      containersTable.labels,
-      containersTable.ports,
-      containersTable.syncedAt,
-    )
+    .select(containerColumns)
     .from(containersTable)
     .where(
       and(
@@ -437,12 +433,12 @@ export async function listHostContainers(input: ListHostContainersInput): Promis
     .limit(input.limit + 1);
 
   const page = rows.slice(0, input.limit);
-  const last = page.at(-1);
   const overflow = rows.length > input.limit;
+  const last = overflow ? page[page.length - 1] : null;
 
   return {
     containers: page.map(toContainerView),
-    nextCursor: overflow && last ? encodeCursor([last.syncedAt.toISOString(), last.id]) : null,
+    nextCursor: last ? encodeCursor([last.syncedAt.toISOString(), last.id]) : null,
   };
 }
 
@@ -456,7 +452,7 @@ function toContainerView(row: typeof containersTable.$inferSelect): ContainerVie
     image: row.image,
     state: row.state,
     status: row.status ?? 'unknown',
-    created: row.created,
+    created: row.created ?? '',
     labels: row.labels,
     ports: row.ports,
     syncedAt: row.syncedAt.toISOString(),

@@ -1,5 +1,4 @@
 import http from 'node:http';
-import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -55,13 +54,11 @@ export interface ContainerInspect {
     Error: string;
     StartedAt: string;
     FinishedAt: string;
-    Health:
-      | {
-          Status: string;
-          FailingStreak: number;
-          Log: unknown[];
-        }
-      | null;
+    Health: {
+      Status: string;
+      FailingStreak: number;
+      Log: unknown[];
+    } | null;
   };
   Config: {
     Tty: boolean;
@@ -83,20 +80,16 @@ export interface ContainerInspect {
 }
 
 export type ContainerState =
-  | 'created'
-  | 'running'
-  | 'paused'
-  | 'restarting'
-  | 'removing'
-  | 'exited'
-  | 'dead'
-  | 'unknown';
+  'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead' | 'unknown';
 
 export type HostStatus = 'healthy' | 'unhealthy' | 'disabled' | 'error';
 
 const allowedSocketsEnv = process.env.DOCKPILOT_DOCKER_SOCKETS;
 const allowedSocketPaths: string[] =
-  allowedSocketsEnv?.split(',').map((s) => s.trim()).filter(Boolean) ?? DOCKER_DEFAULT_ALLOWLIST;
+  allowedSocketsEnv
+    ?.split(',')
+    .map((s) => s.trim())
+    .filter(Boolean) ?? DOCKER_DEFAULT_ALLOWLIST;
 
 let normalizedAllowedPaths: string[] | null = null;
 
@@ -130,7 +123,10 @@ export class DockerEndpointError extends Error {
 }
 
 export class DockerConnectionError extends Error {
-  constructor(message: string, readonly cause?: unknown) {
+  constructor(
+    message: string,
+    readonly cause?: unknown,
+  ) {
     super(message);
     this.name = 'DockerConnectionError';
     if (cause !== undefined) this.cause = cause;
@@ -151,12 +147,16 @@ export class DockerApiError extends Error {
 export function parseDockerEndpoint(input: string): DockerEndpoint {
   const trimmed = input.trim();
   const match = DOCKER_ENDPOINT_PATTERN.exec(trimmed);
-  if (!match || !match[1]) {
-    throw new DockerEndpointError('Only unix:// Docker endpoints are supported for host registration.');
+  if (!match?.[1]) {
+    throw new DockerEndpointError(
+      'Only unix:// Docker endpoints are supported for host registration.',
+    );
   }
   const socketPath = path.resolve(match[1]);
   const normalized = normalizeAllowedPaths();
-  const isAllowed = normalized.some((allowed) => allowed === socketPath || socketPath.startsWith(allowed + '/'));
+  const isAllowed = normalized.some(
+    (allowed) => allowed === socketPath || socketPath.startsWith(allowed + '/'),
+  );
   if (!isAllowed) {
     throw new DockerEndpointError(
       `Docker socket path is not in the operator allowlist. Allowed paths: ${normalized.join(', ')}`,
@@ -165,20 +165,32 @@ export function parseDockerEndpoint(input: string): DockerEndpoint {
   return { kind: 'unix', socketPath };
 }
 
-async function dockerRequest<T>(
+async function dockerRequest(
   endpoint: DockerEndpoint,
   method: string,
   requestPath: string,
   body?: string,
   timeoutMs = DOCKER_REQUEST_TIMEOUT_MS,
-): Promise<{ status: number; body: T; rawBody: string; headers: http.IncomingHttpHeaders }> {
+): Promise<{ status: number; body: unknown; rawBody: string; headers: http.IncomingHttpHeaders }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
 
   let req: http.ClientRequest | null = null;
-  let resolvePromise: (value: { status: number; body: T; rawBody: string; headers: http.IncomingHttpHeaders }) => void;
+  let resolvePromise: (value: {
+    status: number;
+    body: unknown;
+    rawBody: string;
+    headers: http.IncomingHttpHeaders;
+  }) => void;
   let rejectPromise: (reason: Error) => void;
-  const promise = new Promise<{ status: number; body: T; rawBody: string; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
+  const promise = new Promise<{
+    status: number;
+    body: unknown;
+    rawBody: string;
+    headers: http.IncomingHttpHeaders;
+  }>((resolve, reject) => {
     resolvePromise = resolve;
     rejectPromise = reject;
   });
@@ -203,7 +215,9 @@ async function dockerRequest<T>(
         totalBytes += chunk.length;
         if (totalBytes > DOCKER_MAX_RESPONSE_BYTES) {
           res.destroy();
-          rejectPromise(new DockerApiError(res.statusCode ?? 500, 'Docker response exceeded the allowed size.'));
+          rejectPromise(
+            new DockerApiError(res.statusCode ?? 500, 'Docker response exceeded the allowed size.'),
+          );
           return;
         }
         chunks.push(chunk);
@@ -214,25 +228,27 @@ async function dockerRequest<T>(
         const status = res.statusCode ?? 500;
 
         if (status >= 400) {
-          let errorMsg = 'Unknown Docker error';
           try {
-            const errBody = JSON.parse(rawBody || '{}');
-            if (typeof errBody?.message === 'string') errorMsg = errBody.message;
+            const errBody = JSON.parse(rawBody || '{}') as { message?: unknown };
+            if (typeof errBody.message === 'string') {
+              rejectPromise(new DockerApiError(status, errBody.message));
+            } else {
+              rejectPromise(new DockerApiError(status, 'Unknown Docker error'));
+            }
           } catch {
-            // ignore parse errors
+            rejectPromise(new DockerApiError(status, 'Unknown Docker error'));
           }
-          resolvePromise({ status, body: ({} as unknown) as T, rawBody, headers: res.headers });
           return;
         }
 
-        let parsedBody: T;
+        let parsedBody: unknown;
         if (rawBody.trim() === '') {
-          parsedBody = {} as T;
+          parsedBody = {};
         } else {
           try {
-            parsedBody = JSON.parse(rawBody) as T;
+            parsedBody = JSON.parse(rawBody);
           } catch {
-            parsedBody = (rawBody as unknown) as T;
+            parsedBody = rawBody;
           }
         }
 
@@ -256,30 +272,36 @@ async function dockerRequest<T>(
     return await promise;
   } finally {
     clearTimeout(timeout);
-    if (req && !req.finished) {
+    if (req && !req.writableEnded) {
       req.destroy();
     }
   }
 }
 
 export async function dockerVersion(endpoint: DockerEndpoint): Promise<DockerVersion> {
-  const { body } = await dockerRequest<{ Version: string; ApiVersion: string; GitCommit?: string; Os: string; Arch: string; KernelVersion?: string; BuildTime?: string; Experimental?: boolean }>(
-    endpoint,
-    'GET',
-    '/version',
-  );
-  if (!body || typeof body.Version !== 'string' || typeof body.ApiVersion !== 'string') {
+  const { body } = await dockerRequest(endpoint, 'GET', '/version');
+  const versionBody = body as {
+    Version?: unknown;
+    ApiVersion?: unknown;
+    GitCommit?: unknown;
+    Os?: unknown;
+    Arch?: unknown;
+    KernelVersion?: unknown;
+    BuildTime?: unknown;
+    Experimental?: unknown;
+  };
+  if (typeof versionBody.Version !== 'string' || typeof versionBody.ApiVersion !== 'string') {
     throw new DockerApiError(500, 'Docker /version response was malformed.');
   }
   return {
-    Version: body.Version,
-    ApiVersion: body.ApiVersion,
-    GitCommit: body.GitCommit ?? '',
-    Os: body.Os,
-    Arch: body.Arch,
-    KernelVersion: body.KernelVersion ?? '',
-    BuildTime: body.BuildTime ?? '',
-    Experimental: body.Experimental ?? false,
+    Version: versionBody.Version,
+    ApiVersion: versionBody.ApiVersion,
+    GitCommit: typeof versionBody.GitCommit === 'string' ? versionBody.GitCommit : '',
+    Os: typeof versionBody.Os === 'string' ? versionBody.Os : '',
+    Arch: typeof versionBody.Arch === 'string' ? versionBody.Arch : '',
+    KernelVersion: typeof versionBody.KernelVersion === 'string' ? versionBody.KernelVersion : '',
+    BuildTime: typeof versionBody.BuildTime === 'string' ? versionBody.BuildTime : '',
+    Experimental: typeof versionBody.Experimental === 'boolean' ? versionBody.Experimental : false,
   };
 }
 
@@ -287,20 +309,24 @@ export async function listContainers(
   endpoint: DockerEndpoint,
   all = true,
 ): Promise<ContainerSummary[]> {
-  const { body } = await dockerRequest<ContainerSummary[]>(
+  const { body } = await dockerRequest(
     endpoint,
     'GET',
-    `/containers/json?all=${all ? 1 : 0}&size=0`,
+    `/containers/json?all=${all ? '1' : '0'}&size=0`,
   );
-  return Array.isArray(body) ? body : [];
+  if (!Array.isArray(body)) return [];
+  return body as ContainerSummary[];
 }
 
-export async function inspectContainer(endpoint: DockerEndpoint, containerId: string): Promise<ContainerInspect> {
+export async function inspectContainer(
+  endpoint: DockerEndpoint,
+  containerId: string,
+): Promise<ContainerInspect> {
   if (!/^[a-f0-9]{64}$/u.test(containerId)) {
     throw new DockerApiError(400, 'Invalid container ID format.');
   }
-  const { body } = await dockerRequest<ContainerInspect>(endpoint, 'GET', `/containers/${containerId}/json`);
-  return body;
+  const { body } = await dockerRequest(endpoint, 'GET', `/containers/${containerId}/json`);
+  return body as ContainerInspect;
 }
 
 export async function containerLogs(
@@ -314,7 +340,7 @@ export async function containerLogs(
   }
   const rawBuffer = await fetchContainerLogsRaw(endpoint, containerId, tailLines, maxBytes);
   const inspect = await inspectContainer(endpoint, containerId);
-  const isTty = inspect.Config.Tty === true;
+  const isTty = inspect.Config.Tty;
   return demuxLogBuffer(rawBuffer, isTty);
 }
 
@@ -354,14 +380,16 @@ async function fetchContainerLogsRaw(
       chunks.push(chunk);
     });
 
-    res.on('end', () => {});
-    res.on('error', (err) => {
+    res.on('end', () => {
+      // Response complete
+    });
+    res.on('error', () => {
       req.destroy();
       controller.abort();
     });
   });
 
-  req.on('error', (err: NodeJS.ErrnoException) => {
+  req.on('error', () => {
     req.destroy();
     controller.abort();
   });
@@ -369,13 +397,12 @@ async function fetchContainerLogsRaw(
   req.end();
 
   await new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      controller.abort();
-      req.destroy();
+    const finishHandler = () => {
+      resolve();
     };
-
-    const finishHandler = () => resolve();
-    const errorHandler = (err: Error) => reject(err);
+    const errorHandler = (err: Error) => {
+      reject(err);
+    };
 
     req.once('response', finishHandler);
     req.once('error', errorHandler);
@@ -393,8 +420,11 @@ function demuxLogBuffer(buffer: Buffer, isTty: boolean): string {
   let output = '';
   const maxFrames = 10000;
 
-  while (offset + 8 <= buffer.length && output.length < DOCKER_MAX_LOG_BYTES && output.split('\n').length < maxFrames) {
-    const stream = buffer[offset];
+  while (
+    offset + 8 <= buffer.length &&
+    output.length < DOCKER_MAX_LOG_BYTES &&
+    output.split('\n').length < maxFrames
+  ) {
     const size = buffer.readUInt32BE(offset + 4);
     offset += 8;
 
@@ -414,39 +444,51 @@ export async function startContainer(endpoint: DockerEndpoint, containerId: stri
   }
   const { status } = await dockerRequest(endpoint, 'POST', `/containers/${containerId}/start`);
   if (status !== 204 && status !== 304) {
-    throw new DockerApiError(status, `Failed to start container: ${status}.`);
+    throw new DockerApiError(status, `Failed to start container: ${String(status)}.`);
   }
 }
 
-export async function stopContainer(endpoint: DockerEndpoint, containerId: string, timeoutSec = 10): Promise<void> {
+export async function stopContainer(
+  endpoint: DockerEndpoint,
+  containerId: string,
+  timeoutSec = 10,
+): Promise<void> {
   if (!/^[a-f0-9]{64}$/u.test(containerId)) {
     throw new DockerApiError(400, 'Invalid container ID format.');
   }
   const { status } = await dockerRequest(
     endpoint,
     'POST',
-    `/containers/${containerId}/stop?t=${timeoutSec}`,
+    `/containers/${containerId}/stop?t=${String(timeoutSec)}`,
   );
   if (status !== 204) {
-    throw new DockerApiError(status, `Failed to stop container: ${status}.`);
+    throw new DockerApiError(status, `Failed to stop container: ${String(status)}.`);
   }
 }
 
-export async function restartContainer(endpoint: DockerEndpoint, containerId: string, timeoutSec = 10): Promise<void> {
+export async function restartContainer(
+  endpoint: DockerEndpoint,
+  containerId: string,
+  timeoutSec = 10,
+): Promise<void> {
   if (!/^[a-f0-9]{64}$/u.test(containerId)) {
     throw new DockerApiError(400, 'Invalid container ID format.');
   }
   const { status } = await dockerRequest(
     endpoint,
     'POST',
-    `/containers/${containerId}/restart?t=${timeoutSec}`,
+    `/containers/${containerId}/restart?t=${String(timeoutSec)}`,
   );
   if (status !== 204) {
-    throw new DockerApiError(status, `Failed to restart container: ${status}.`);
+    throw new DockerApiError(status, `Failed to restart container: ${String(status)}.`);
   }
 }
 
-export async function removeContainer(endpoint: DockerEndpoint, containerId: string, force = false): Promise<void> {
+export async function removeContainer(
+  endpoint: DockerEndpoint,
+  containerId: string,
+  force = false,
+): Promise<void> {
   if (!/^[a-f0-9]{64}$/u.test(containerId)) {
     throw new DockerApiError(400, 'Invalid container ID format.');
   }
@@ -456,7 +498,7 @@ export async function removeContainer(endpoint: DockerEndpoint, containerId: str
     `/containers/${containerId}?force=${force ? '1' : '0'}&v=0`,
   );
   if (status !== 204) {
-    throw new DockerApiError(status, `Failed to remove container: ${status}.`);
+    throw new DockerApiError(status, `Failed to remove container: ${String(status)}.`);
   }
 }
 

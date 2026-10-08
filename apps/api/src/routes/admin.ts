@@ -11,11 +11,8 @@ import {
   auditEventSchema,
   createAiCredentialInputSchema,
   createAiCredentialResponseSchema,
-  disableAiCredentialResponseSchema,
-  enableAiCredentialResponseSchema,
   idSchema,
   revokeAiCredentialResponseSchema,
-  rotateAiCredentialResponseSchema,
   systemStatusSchema,
   type SafeUser,
 } from '@dockpilot/shared';
@@ -220,7 +217,6 @@ export function administratorRoutes(app: FastifyInstance): void {
 
     return reply.code(201).send(createAiCredentialResponseSchema.parse(created));
   });
-
 
   app.get('/audit-events', async (request, reply) => {
     const user = requireAdministrator(request, reply);

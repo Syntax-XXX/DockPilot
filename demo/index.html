@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0d12" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="An interactive, local-only DockPilot demo. Do not enter real credentials."
+    />
+    <meta name="demo-mode" content="browser-local-only" />
+    <title>DockPilot — Docker, without the guessing.</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" crossorigin href="./assets/index-BL0juJub.css" />
+    <script src="./mock-api.js"></script>
+    <style>
+      .demo-signin {
+        display: block;
+        margin: 14px auto 0;
+        padding: 7px 12px;
+        color: #9cb2d0;
+        border: 1px solid #2b3543;
+        border-radius: 5px;
+        background: #141a23;
+        font:
+          10px ui-monospace,
+          monospace;
+        cursor: pointer;
+      }
+      .demo-signin:hover {
+        color: #fff;
+        border-color: #4776ae;
+      }
+    </style>
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'demo-signin';
+        button.textContent = 'Open demo dashboard';
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          button.textContent = 'Opening demo…';
+          try {
+            const response = await fetch('/api/v1/auth/setup-status');
+            const status = await response.json();
+            if (status.setupRequired) {
+              const setup = await fetch('/api/v1/auth/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  email: 'demo@dockpilot.local',
+                  password: 'DockPilotDemoPassword2026!',
+                  name: 'Demo Operator',
+                  organizationName: 'DockPilot Demo',
+                }),
+              });
+              if (!setup.ok) throw new Error('Could not create the local demo account.');
+            } else {
+              const login = await fetch('/api/v1/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  email: 'demo@dockpilot.local',
+                  password: 'DockPilotDemoPassword2026!',
+                }),
+              });
+              if (!login.ok) throw new Error('Could not sign into the local demo.');
+            }
+            location.reload();
+          } catch (error) {
+            button.disabled = false;
+            button.textContent = error instanceof Error ? error.message : 'Demo sign-in failed';
+          }
+        });
+        const addButton = () => {
+          const authCard = document.querySelector('.auth-card-wrap');
+          if (authCard && !authCard.querySelector('.demo-signin')) authCard.append(button);
+        };
+        addButton();
+        new MutationObserver(addButton).observe(document.body, { childList: true, subtree: true });
+      });
+    </script>
+    <script type="module" crossorigin src="./assets/index-BFjK-xJq.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
