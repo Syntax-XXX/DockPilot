@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress';
 export default defineConfig({
   title: 'DockPilot wiki',
   description: 'A lightweight wiki for the DockPilot repository.',
-  base: '/',
+  base: process.env.DOCS_BASE || '/',
   ignoreDeadLinks: [
     { path: 'README.md', message: 'Repo-level README is not part of the wiki site.' },
     {

@@ -2,7 +2,12 @@ name: Deploy wiki to GitHub Pages
 
 on:
   push:
-    branches: ["main"]
+    branches: ['main']
+    paths:
+      - 'wiki/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-wiki.yml'
   workflow_dispatch:
 
 permissions:
@@ -11,7 +16,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: 'pages'
   cancel-in-progress: false
 
 jobs:
@@ -23,11 +28,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: 22
+          cache: npm
 
       - name: Install dependencies
-        run: npm install --ignore-scripts --legacy-peer-deps
+        run: npm ci
 
       - name: Setup Pages
         id: pages
@@ -35,6 +40,8 @@ jobs:
 
       - name: Build wiki
         run: npm run build --workspace=@dockpilot/wiki
+        env:
+          DOCS_BASE: ${{ steps.pages.outputs.base_path }}/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
