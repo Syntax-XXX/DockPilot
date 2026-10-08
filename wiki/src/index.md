@@ -7,6 +7,8 @@ description: A lightweight wiki for the DockPilot repository.
 
 This is a lightweight wiki for the DockPilot repository. It is meant to help someone orient quickly without reading the whole codebase.
 
+<a class="VPButton medium brand" href="./demo/">🚀 Try the interactive demo</a>
+
 ## What DockPilot is
 
 A self-hosted Docker infrastructure control center with:
