@@ -1,14 +1,19 @@
-name: Deploy wiki to GitHub Pages
+name: Deploy wiki and demo to GitHub Pages
 
 on:
   push:
     branches: ['main']
     paths:
       - 'wiki/**'
+      - 'demo/**'
+      - 'apps/web/**'
+      - 'packages/shared/**'
       - 'package.json'
       - 'package-lock.json'
+      - '.github/workflows/deploy-pages.yml'
       - '.github/workflows/deploy-wiki.yml'
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -38,15 +43,35 @@ jobs:
         id: pages
         uses: actions/configure-pages@v6
 
+      - name: Build shared package
+        run: npm run build:shared
+
+      - name: Build web UI
+        run: npm run build --workspace=@dockpilot/web
+
       - name: Build wiki
         run: npm run build --workspace=@dockpilot/wiki
         env:
           DOCS_BASE: ${{ steps.pages.outputs.base_path }}/
 
-      - name: Upload artifact
+      - name: Prepare static demo
+        run: node demo/prepare-pages.mjs
+
+      - name: Assemble Pages site
+        run: |
+          mkdir -p pages-site/demo
+          cp -R wiki/src/.vitepress/dist/. pages-site/
+          cp demo/index.html demo/mock-api.js pages-site/demo/
+          cp -R demo/assets pages-site/demo/assets
+          test -s pages-site/index.html
+          test -s pages-site/demo/index.html
+          test -s pages-site/demo/mock-api.js
+          test -n "$(find pages-site/demo/assets -maxdepth 1 -type f -name '*.js' -print -quit)"
+
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: wiki/src/.vitepress/dist
+          path: pages-site
 
   deploy:
     environment:
