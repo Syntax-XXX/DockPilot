@@ -195,6 +195,101 @@ export async function revokeAiCredential(input: {
   throw conflictError('This AI credential has already been revoked.');
 }
 
+export interface DisableAiCredentialInput {
+  organizationId: string;
+  credentialId: string;
+  executor?: DbExecutor;
+}
+
+export async function disableAiCredential(input: DisableAiCredentialInput): Promise<AiCredentialView> {
+  const executor = input.executor ?? db;
+  const updated = await executor
+    .update(aiCredentials)
+    .set({ disabledAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(aiCredentials.id, input.credentialId),
+        eq(aiCredentials.organizationId, input.organizationId),
+        isNull(aiCredentials.revokedAt),
+        isNull(aiCredentials.disabledAt),
+      ),
+    )
+    .returning(credentialColumns);
+
+  const row = updated[0];
+  if (row) return toView(row);
+
+  const existing = await executor
+    .select({ revokedAt: aiCredentials.revokedAt, disabledAt: aiCredentials.disabledAt })
+    .from(aiCredentials)
+    .where(
+      and(
+        eq(aiCredentials.id, input.credentialId),
+        eq(aiCredentials.organizationId, input.organizationId),
+      ),
+    )
+    .limit(1);
+  if (!existing[0]) throw notFoundError('The AI credential does not exist.');
+  throw conflictError('This AI credential cannot be disabled.');
+}
+
+export interface EnableAiCredentialInput {
+  organizationId: string;
+  credentialId: string;
+  executor?: DbExecutor;
+}
+
+export async function enableAiCredential(input: EnableAiCredentialInput): Promise<AiCredentialView> {
+  const executor = input.executor ?? db;
+  const updated = await executor
+    .update(aiCredentials)
+    .set({ disabledAt: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(aiCredentials.id, input.credentialId),
+        eq(aiCredentials.organizationId, input.organizationId),
+        isNull(aiCredentials.revokedAt),
+      ),
+    )
+    .returning(credentialColumns);
+
+  const row = updated[0];
+  if (row) return toView(row);
+
+  throw conflictError('This AI credential cannot be enabled.');
+}
+
+export interface RotateAiCredentialInput {
+  organizationId: string;
+  credentialId: string;
+  executor?: DbExecutor;
+}
+
+export async function rotateAiCredential(input: RotateAiCredentialInput): Promise<CreateAiCredentialResponse> {
+  const executor = input.executor ?? db;
+  const generated = createAiToken();
+  const updated = await executor
+    .update(aiCredentials)
+    .set({
+      tokenHash: generated.tokenHash,
+      tokenPrefix: generated.tokenPrefix,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(aiCredentials.id, input.credentialId),
+        eq(aiCredentials.organizationId, input.organizationId),
+        isNull(aiCredentials.revokedAt),
+      ),
+    )
+    .returning(credentialColumns);
+
+  const row = updated[0];
+  if (!row) throw new Error('AI credential rotation failed.');
+
+  return { credential: toView(row), token: generated.token };
+}
+
 export interface UpdateOwnCredentialInput {
   identity: McpIdentity;
   description?: string | null | undefined;

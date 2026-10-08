@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   aiCredentialListResponseSchema,
+  aiCredentialViewSchema,
   approvalDecisionInputSchema,
   approvalDecisionResponseSchema,
   approvalListResponseSchema,
@@ -10,8 +11,11 @@ import {
   auditEventSchema,
   createAiCredentialInputSchema,
   createAiCredentialResponseSchema,
+  disableAiCredentialResponseSchema,
+  enableAiCredentialResponseSchema,
   idSchema,
   revokeAiCredentialResponseSchema,
+  rotateAiCredentialResponseSchema,
   systemStatusSchema,
   type SafeUser,
 } from '@dockpilot/shared';
@@ -19,8 +23,11 @@ import { db } from '../db/index.js';
 import { writeAuditEvent } from '../lib/audit.js';
 import {
   createAiCredential,
+  disableAiCredential,
+  enableAiCredential,
   listAiCredentials,
   revokeAiCredential,
+  rotateAiCredential,
 } from '../services/ai-credentials.js';
 import { getAuditEvent, listAuditEvents } from '../services/audit-events.js';
 import { decideApproval, listApprovals } from '../services/approvals.js';
@@ -125,6 +132,95 @@ export function administratorRoutes(app: FastifyInstance): void {
 
     return reply.send(revokeAiCredentialResponseSchema.parse({ credential }));
   });
+
+  app.post('/ai-credentials/:id/disable', async (request, reply) => {
+    const user = requireAdministrator(request, reply);
+    if (user === null) return reply;
+    const params = credentialParamsSchema.safeParse(request.params);
+    if (!params.success)
+      return validationFailure(reply, 'The AI credential identifier is not valid.');
+
+    const credential = await db.transaction(async (transaction) => {
+      const disabled = await disableAiCredential({
+        organizationId: user.organizationId,
+        credentialId: params.data.id,
+        executor: transaction,
+      });
+      await writeAuditEvent(transaction, {
+        organizationId: user.organizationId,
+        actorUserId: user.id,
+        action: 'ai_credential.disabled',
+        resourceType: 'ai_credential',
+        resourceId: disabled.id,
+        requestId: request.id,
+        metadata: { name: disabled.name, permissionLevel: disabled.permissionLevel },
+      });
+      return disabled;
+    });
+
+    return reply.send(aiCredentialViewSchema.parse(credential));
+  });
+
+  app.post('/ai-credentials/:id/enable', async (request, reply) => {
+    const user = requireAdministrator(request, reply);
+    if (user === null) return reply;
+    const params = credentialParamsSchema.safeParse(request.params);
+    if (!params.success)
+      return validationFailure(reply, 'The AI credential identifier is not valid.');
+
+    const credential = await db.transaction(async (transaction) => {
+      const enabled = await enableAiCredential({
+        organizationId: user.organizationId,
+        credentialId: params.data.id,
+        executor: transaction,
+      });
+      await writeAuditEvent(transaction, {
+        organizationId: user.organizationId,
+        actorUserId: user.id,
+        action: 'ai_credential.enabled',
+        resourceType: 'ai_credential',
+        resourceId: enabled.id,
+        requestId: request.id,
+        metadata: { name: enabled.name, permissionLevel: enabled.permissionLevel },
+      });
+      return enabled;
+    });
+
+    return reply.send(aiCredentialViewSchema.parse(credential));
+  });
+
+  app.post('/ai-credentials/:id/rotate', async (request, reply) => {
+    const user = requireAdministrator(request, reply);
+    if (user === null) return reply;
+    const params = credentialParamsSchema.safeParse(request.params);
+    if (!params.success)
+      return validationFailure(reply, 'The AI credential identifier is not valid.');
+
+    const created = await db.transaction(async (transaction) => {
+      const result = await rotateAiCredential({
+        organizationId: user.organizationId,
+        credentialId: params.data.id,
+        executor: transaction,
+      });
+      await writeAuditEvent(transaction, {
+        organizationId: user.organizationId,
+        actorUserId: user.id,
+        action: 'ai_credential.rotated',
+        resourceType: 'ai_credential',
+        resourceId: result.credential.id,
+        requestId: request.id,
+        metadata: {
+          name: result.credential.name,
+          permissionLevel: result.credential.permissionLevel,
+          tokenPrefix: result.credential.tokenPrefix,
+        },
+      });
+      return result;
+    });
+
+    return reply.code(201).send(createAiCredentialResponseSchema.parse(created));
+  });
+
 
   app.get('/audit-events', async (request, reply) => {
     const user = requireAdministrator(request, reply);

@@ -15,6 +15,13 @@
       "when": 1791462691248,
       "tag": "0001_mcp_control_layer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791492215132,
+      "tag": "0002_flippant_beast",
+      "breakpoints": true
     }
   ]
 }

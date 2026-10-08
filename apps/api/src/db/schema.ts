@@ -25,6 +25,18 @@ export const approvalStatus = pgEnum('approval_status', [
   'failed',
 ]);
 
+export const hostStatus = pgEnum('host_status', ['healthy', 'unhealthy', 'disabled', 'error']);
+
+export const containerState = pgEnum('container_state', [
+  'created',
+  'running',
+  'paused',
+  'restarting',
+  'removing',
+  'exited',
+  'dead',
+]);
+
 export const organizations = pgTable('organizations', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 100 }).notNull(),
@@ -185,5 +197,68 @@ export const auditLogs = pgTable(
       'audit_logs_outcome_error_chk',
       sql`${table.outcome} <> 'failure' OR ${table.errorCategory} IS NOT NULL`,
     ),
+  ],
+);
+
+export const hosts = pgTable(
+  'hosts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    name: varchar('name', { length: 80 }).notNull(),
+    description: varchar('description', { length: 280 }),
+    endpoint: varchar('endpoint', { length: 255 }).notNull(),
+    status: hostStatus('status').notNull().default('healthy'),
+    lastErrorAt: timestamp('last_error_at', { withTimezone: true, mode: 'date' }),
+    lastError: varchar('last_error', { length: 500 }),
+    dockerVersion: varchar('docker_version', { length: 40 }),
+    labels: jsonb('labels').$type<Record<string, string> | null>(),
+    metadata: jsonb('metadata').$type<Record<string, unknown> | null>(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('hosts_organization_name_uq').on(table.organizationId, table.name),
+    index('hosts_organization_idx').on(table.organizationId),
+    index('hosts_status_idx').on(table.organizationId, table.status),
+    index('hosts_created_idx').on(table.createdAt),
+  ],
+);
+
+export const containers = pgTable(
+  'containers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    hostId: uuid('host_id')
+      .notNull()
+      .references(() => hosts.id, { onDelete: 'cascade' }),
+    containerId: varchar('container_id', { length: 64 }).notNull(),
+    shortId: varchar('short_id', { length: 12 }),
+    name: varchar('name', { length: 255 }),
+    image: varchar('image', { length: 255 }).notNull(),
+    state: containerState('state').notNull().default('created'),
+    status: varchar('status', { length: 120 }),
+    created: varchar('created', { length: 32 }),
+    labels: jsonb('labels').$type<Record<string, string> | null>(),
+    ports: jsonb('ports').$type<unknown[] | null>(),
+    syncedAt: timestamp('synced_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('containers_host_container_id_uq').on(table.hostId, table.containerId),
+    index('containers_organization_idx').on(table.organizationId),
+    index('containers_host_state_idx').on(table.hostId, table.state),
+    index('containers_host_synced_idx').on(table.hostId, table.syncedAt),
+    index('containers_container_id_idx').on(table.containerId),
   ],
 );

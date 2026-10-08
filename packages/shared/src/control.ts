@@ -77,6 +77,25 @@ export const revokeAiCredentialResponseSchema = z
   })
   .strict();
 
+export const disableAiCredentialResponseSchema = z
+  .object({
+    credential: aiCredentialViewSchema,
+  })
+  .strict();
+
+export const enableAiCredentialResponseSchema = z
+  .object({
+    credential: aiCredentialViewSchema,
+  })
+  .strict();
+
+export const rotateAiCredentialResponseSchema = z
+  .object({
+    credential: aiCredentialViewSchema,
+    token: z.string(),
+  })
+  .strict();
+
 export const systemStatusSchema = z
   .object({
     setupRequired: z.boolean(),
@@ -227,3 +246,128 @@ export type AuditErrorCategory = z.infer<typeof auditErrorCategorySchema>;
 export type ApprovalView = z.infer<typeof approvalViewSchema>;
 export type ApprovalStatus = z.infer<typeof approvalStatusSchema>;
 export type ApprovalDecisionInput = z.infer<typeof approvalDecisionInputSchema>;
+
+export const hostStatusSchema = z.enum(['healthy', 'unhealthy', 'disabled', 'error']);
+
+export const hostViewSchema = z
+  .object({
+    id: idSchema,
+    organizationId: idSchema,
+    createdByUserId: idSchema.nullable(),
+    name: z.string(),
+    description: z.string().nullable(),
+    endpoint: z.string(),
+    status: hostStatusSchema,
+    lastErrorAt: isoDateTimeSchema.nullable(),
+    lastError: z.string().nullable(),
+    dockerVersion: z.string().nullable(),
+    labels: z.record(z.string(), z.string()).nullable(),
+    metadata: z.record(z.string(), z.unknown()).nullable(),
+    lastSeenAt: isoDateTimeSchema.nullable(),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .strict();
+
+export const createHostInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    description: z.string().trim().max(280).optional(),
+    endpoint: z.string().trim().min(1).max(255),
+    labels: z.record(z.string(), z.string()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+export const createHostResponseSchema = z
+  .object({
+    host: hostViewSchema,
+    token: z.string(),
+  })
+  .strict();
+
+export const hostListResponseSchema = z
+  .object({
+    hosts: z.array(hostViewSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+
+export const updateHostInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    description: z.string().trim().max(280).nullable().optional(),
+    endpoint: z.string().trim().min(1).max(255).optional(),
+    labels: z.record(z.string(), z.string()).nullable().optional(),
+    metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+  })
+  .strict();
+
+export const updateHostResponseSchema = z
+  .object({
+    host: hostViewSchema,
+  })
+  .strict();
+
+export const containerStateSchema = z.enum([
+  'created',
+  'running',
+  'paused',
+  'restarting',
+  'removing',
+  'exited',
+  'dead',
+  'unknown',
+]);
+
+export const containerViewSchema = z
+  .object({
+    id: idSchema,
+    hostId: idSchema,
+    containerId: z.string(),
+    shortId: z.string().nullable(),
+    name: z.string().nullable(),
+    image: z.string(),
+    state: containerStateSchema,
+    status: z.string(),
+    created: z.string(),
+    labels: z.record(z.string(), z.string()).nullable(),
+    ports: z.array(z.unknown()).nullable(),
+    syncedAt: isoDateTimeSchema,
+  })
+  .strict();
+
+export const containerLogViewSchema = z
+  .object({
+    log: z.string(),
+    tty: z.boolean(),
+    tail: z.number().int().min(1).max(1000),
+  })
+  .strict();
+
+export const containerListResponseSchema = z
+  .object({
+    containers: z.array(containerViewSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+
+export const containerLogResponseSchema = z
+  .object({
+    log: containerLogViewSchema,
+  })
+  .strict();
+
+export const containerActionResponseSchema = z
+  .object({
+    container: containerViewSchema,
+  })
+  .strict();
+
+export type HostView = z.infer<typeof hostViewSchema>;
+export type HostStatus = z.infer<typeof hostStatusSchema>;
+export type CreateHostInput = z.infer<typeof createHostInputSchema>;
+export type CreateHostResponse = z.infer<typeof createHostResponseSchema>;
+export type UpdateHostInput = z.infer<typeof updateHostInputSchema>;
+export type ContainerView = z.infer<typeof containerViewSchema>;
+export type ContainerLogView = z.infer<typeof containerLogViewSchema>;
