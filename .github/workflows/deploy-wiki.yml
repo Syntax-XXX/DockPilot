@@ -1,0 +1,13 @@
+name: Deploy wiki and demo to GitHub Pages (compatibility)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-pages.yml

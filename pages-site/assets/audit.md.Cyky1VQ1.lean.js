@@ -1,0 +1,1 @@
+import{_ as a,o as t,c as i,ae as o}from"./chunks/framework.C4zpkcTP.js";const p=JSON.parse('{"title":"Audit logging","description":"","frontmatter":{},"headers":[],"relativePath":"audit.md","filePath":"audit.md"}'),r={name:"audit.md"};function n(s,e,d,l,c,u){return t(),i("div",null,[...e[0]||(e[0]=[o("",19)])])}const m=a(r,[["render",n]]);export{p as __pageData,m as default};

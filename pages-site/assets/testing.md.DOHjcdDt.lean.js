@@ -1,0 +1,1 @@
+import{_ as t,o as e,c as a,ae as s}from"./chunks/framework.C4zpkcTP.js";const u=JSON.parse('{"title":"Testing","description":"","frontmatter":{},"headers":[],"relativePath":"testing.md","filePath":"testing.md"}'),n={name:"testing.md"};function l(o,i,r,d,h,p){return e(),a("div",null,[...i[0]||(i[0]=[s("",16)])])}const k=t(n,[["render",l]]);export{u as __pageData,k as default};

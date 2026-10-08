@@ -18,6 +18,7 @@ export default defineConfig({
       { text: 'MCP', link: '/mcp' },
       { text: 'Admin', link: '/admin' },
       { text: 'Security', link: '/security' },
+      { text: '🚀 Try the live demo', link: '/demo/' },
     ],
     sidebar: [
       {

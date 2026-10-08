@@ -1,0 +1,1 @@
+import{_ as t,o as a,c as o,ae as r}from"./chunks/framework.C4zpkcTP.js";const h=JSON.parse('{"title":"MCP control layer","description":"","frontmatter":{},"headers":[],"relativePath":"mcp.md","filePath":"mcp.md"}'),i={name:"mcp.md"};function n(s,e,d,l,c,p){return a(),o("div",null,[...e[0]||(e[0]=[r("",27)])])}const g=t(i,[["render",n]]);export{h as __pageData,g as default};

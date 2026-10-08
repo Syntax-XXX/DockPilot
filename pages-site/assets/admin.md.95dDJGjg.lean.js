@@ -1,0 +1,1 @@
+import{_ as a,o as t,c as i,ae as r}from"./chunks/framework.C4zpkcTP.js";const h=JSON.parse('{"title":"Admin surface","description":"","frontmatter":{},"headers":[],"relativePath":"admin.md","filePath":"admin.md"}'),o={name:"admin.md"};function d(s,e,n,l,c,u){return t(),i("div",null,[...e[0]||(e[0]=[r("",18)])])}const v=a(o,[["render",d]]);export{h as __pageData,v as default};
