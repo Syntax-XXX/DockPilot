@@ -11,12 +11,14 @@ import {
   Eye,
   EyeOff,
   Fingerprint,
+  KeyRound,
   LockKeyhole,
   LogOut,
   Network,
   Radio,
   Server,
   Shield,
+  ShieldAlert,
   ShieldCheck,
   ShipWheel,
   Sparkles,
@@ -33,9 +35,11 @@ import {
   logOut,
   ApiError,
 } from '../lib/api.js';
+import { AdminControl, isAdministrator, type AdminSection } from './AdminControl.js';
 import type { SafeUser } from '@dockpilot/shared';
 
 type LoadState = 'loading' | 'ready' | 'error';
+type ConsoleSection = 'overview' | AdminSection;
 type ServerStatus = 'checking' | 'online' | 'offline';
 type AuthMode = 'setup' | 'login';
 
@@ -552,6 +556,8 @@ function OperatorConsole({
   clearGlobalError: () => void;
 }) {
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [section, setSection] = useState<ConsoleSection>('overview');
+  const administrator = isAdministrator(user);
   async function doLogout() {
     setLogoutBusy(true);
     await onLogout();
@@ -576,12 +582,14 @@ function OperatorConsole({
         </header>
         <nav className="sidebar-nav" aria-label="Main navigation">
           <span className="nav-section-label">WORKSPACE</span>
-          <a className="nav-item nav-item--active" href="#overview">
-            <span className="nav-icon">
-              <Activity size={17} />
-            </span>
-            Overview
-          </a>
+          <SectionNavItem
+            icon={Activity}
+            title="Overview"
+            active={section === 'overview'}
+            onSelect={() => {
+              setSection('overview');
+            }}
+          />
           <span className="nav-section-label nav-section-label--spaced">RESOURCES</span>
           <NavItem icon={Server} title="Hosts" />
           <NavItem icon={Container} title="Containers" />
@@ -593,6 +601,36 @@ function OperatorConsole({
           <NavItem icon={Sparkles} title="Docker Doctor" badge="SOON" />
           <NavItem icon={ShieldCheck} title="Backups" badge="SOON" />
           <NavItem icon={Activity} title="Alerts" />
+          {administrator && (
+            <>
+              <div className="sidebar-nav-divider" />
+              <span className="nav-section-label nav-section-label--spaced">AI CONTROL</span>
+              <SectionNavItem
+                icon={KeyRound}
+                title="AI credentials"
+                active={section === 'ai-credentials'}
+                onSelect={() => {
+                  setSection('ai-credentials');
+                }}
+              />
+              <SectionNavItem
+                icon={Activity}
+                title="AI activity"
+                active={section === 'audit-log'}
+                onSelect={() => {
+                  setSection('audit-log');
+                }}
+              />
+              <SectionNavItem
+                icon={ShieldAlert}
+                title="Approvals"
+                active={section === 'approvals'}
+                onSelect={() => {
+                  setSection('approvals');
+                }}
+              />
+            </>
+          )}
         </nav>
         <div className="sidebar-bottom">
           <div className="agent-empty">
@@ -627,7 +665,7 @@ function OperatorConsole({
           <div className="breadcrumb">
             <span>Workspace</span>
             <span className="breadcrumb-slash">/</span>
-            <strong>Overview</strong>
+            <strong>{sectionTitle(section)}</strong>
           </div>
           <div className="topbar-right">
             <StatusDot status={serverStatus} />
@@ -653,194 +691,233 @@ function OperatorConsole({
               <TriangleAlert size={15} /> {globalError} <span>×</span>
             </button>
           )}
-          <section className="page-heading">
-            <div>
-              <div className="date-label">
-                <span className="live-dot" /> YOUR INFRASTRUCTURE{' '}
-                <span className="date-separator">/</span>{' '}
-                <span className="date-local">
-                  {new Date()
-                    .toLocaleDateString(undefined, {
-                      weekday: 'long',
-                      month: 'long',
-                      day: 'numeric',
-                    })
-                    .toUpperCase()}
-                </span>
-              </div>
-              <h1>
-                Good {greeting()}, {user.name.split(' ')[0]}
-                <span className="heading-period">.</span>
-              </h1>
-              <p>Here’s the view from your command center.</p>
-            </div>
-            <button
-              className="button button--outline"
-              onClick={() => {
-                window.location.reload();
-              }}
-            >
-              <Activity size={14} /> Refresh overview
-            </button>
-          </section>
-          <div className="stats-grid">
-            <StatCard
-              icon={Server}
-              label="CONNECTED HOSTS"
-              value="—"
-              sub="Connect an agent to begin"
-              accent="blue"
-            />
-            <StatCard
-              icon={Container}
-              label="RUNNING CONTAINERS"
-              value="—"
-              sub="No container data yet"
-              accent="green"
-            />
-            <StatCard
-              icon={TriangleAlert}
-              label="NEEDS ATTENTION"
-              value="—"
-              sub="Awaiting host connection"
-              accent="amber"
-            />
-            <StatCard
-              icon={ShieldCheck}
-              label="SECURITY SCORE"
-              value="—"
-              sub="Docker Doctor · awaiting data"
-              accent="purple"
-            />
-          </div>
-          <section className="connect-card">
-            <div className="connect-card-left">
-              <div className="connect-label">
-                <span className="terminal-green">
-                  <Terminal size={13} />
-                </span>
-                GETTING STARTED<span className="connect-underscore">_</span>
-              </div>
-              <h2>Nothing to see. Yet.</h2>
-              <p>
-                DockPilot is connected and ready. Add an agent to a Docker host to bring your
-                infrastructure into focus. Real container and server data will show up here as soon
-                as a host checks in.
-              </p>
-              <button
-                className="button button--connect"
-                disabled
-                title="Agent enrollment is being built in milestone 2"
-              >
-                Connect a Docker host <ArrowRight size={15} />
-              </button>
-              <span className="connect-preflight">
-                <Shield size={12} /> Host credentials stay on your own server.
-              </span>
-            </div>
-            <div className="connect-art" aria-hidden="true">
-              <div className="orbit orbit--outer" />
-              <div className="orbit orbit--inner" />
-              <div className="orbit-center">
-                <ShipWheel size={31} strokeWidth={1.5} />
-              </div>
-              <span className="orbit-terminal">
-                <Terminal size={12} />
-              </span>
-              <span className="orbit-container">
-                <Container size={12} />
-              </span>
-              <span className="orbit-shield">
-                <ShieldCheck size={12} />
-              </span>
-              <span className="orbit-server">
-                <Server size={12} />
-              </span>
-              <span className="orbit-satellite" />
-            </div>
-          </section>
-          <div className="lower-grid">
-            <section className="panel panel--activity">
-              <div className="panel-header">
+          {section === 'overview' ? (
+            <>
+              <section className="page-heading">
                 <div>
-                  <p className="panel-eyebrow">WHAT’S HAPPENING</p>
-                  <h3>Recent activity</h3>
+                  <div className="date-label">
+                    <span className="live-dot" /> YOUR INFRASTRUCTURE{' '}
+                    <span className="date-separator">/</span>{' '}
+                    <span className="date-local">
+                      {new Date()
+                        .toLocaleDateString(undefined, {
+                          weekday: 'long',
+                          month: 'long',
+                          day: 'numeric',
+                        })
+                        .toUpperCase()}
+                    </span>
+                  </div>
+                  <h1>
+                    Good {greeting()}, {user.name.split(' ')[0]}
+                    <span className="heading-period">.</span>
+                  </h1>
+                  <p>Here’s the view from your command center.</p>
                 </div>
-                <span className="panel-icon">
-                  <Activity size={16} />
-                </span>
-              </div>
-              <div className="quiet-empty">
-                <span className="quiet-empty-icon">
-                  <Activity size={17} />
-                </span>
-                <span>
-                  <strong>The log is quiet.</strong>
-                  <span>Host and container events will appear here.</span>
-                </span>
-                <span className="empty-line" />
-              </div>
-            </section>
-            <section className="panel panel--health">
-              <div className="panel-header">
-                <div>
-                  <p className="panel-eyebrow">SYSTEM STATUS</p>
-                  <h3>System health</h3>
-                </div>
-                <span className="panel-icon panel-icon--green">
-                  <ShieldCheck size={16} />
-                </span>
-              </div>
-              <div className="health-row">
-                <span className="health-indicator health-indicator--green" />
-                <span className="health-row-label">DockPilot API</span>
-                <span className={`health-status health-status--${serverStatus}`}>
-                  {serverStatus === 'online'
-                    ? 'Connected'
-                    : serverStatus === 'offline'
-                      ? 'Disconnected'
-                      : 'Checking'}
-                </span>
-                <Check
-                  size={14}
-                  className={`health-check ${serverStatus !== 'online' ? 'health-check--hidden' : ''}`}
+                <button
+                  className="button button--outline"
+                  onClick={() => {
+                    window.location.reload();
+                  }}
+                >
+                  <Activity size={14} /> Refresh overview
+                </button>
+              </section>
+              <div className="stats-grid">
+                <StatCard
+                  icon={Server}
+                  label="CONNECTED HOSTS"
+                  value="—"
+                  sub="Connect an agent to begin"
+                  accent="blue"
+                />
+                <StatCard
+                  icon={Container}
+                  label="RUNNING CONTAINERS"
+                  value="—"
+                  sub="No container data yet"
+                  accent="green"
+                />
+                <StatCard
+                  icon={TriangleAlert}
+                  label="NEEDS ATTENTION"
+                  value="—"
+                  sub="Awaiting host connection"
+                  accent="amber"
+                />
+                <StatCard
+                  icon={ShieldCheck}
+                  label="SECURITY SCORE"
+                  value="—"
+                  sub="Docker Doctor · awaiting data"
+                  accent="purple"
                 />
               </div>
-              <div className="health-row">
-                <span className="health-indicator health-indicator--blue" />
-                <span className="health-row-label">Authentication</span>
-                <span className="health-status health-status--green">Secured</span>
-                <Fingerprint size={15} className="health-check" />
+              <section className="connect-card">
+                <div className="connect-card-left">
+                  <div className="connect-label">
+                    <span className="terminal-green">
+                      <Terminal size={13} />
+                    </span>
+                    GETTING STARTED<span className="connect-underscore">_</span>
+                  </div>
+                  <h2>Nothing to see. Yet.</h2>
+                  <p>
+                    DockPilot is connected and ready. Add an agent to a Docker host to bring your
+                    infrastructure into focus. Real container and server data will show up here as
+                    soon as a host checks in.
+                  </p>
+                  <button
+                    className="button button--connect"
+                    disabled
+                    title="Agent enrollment is being built in milestone 2"
+                  >
+                    Connect a Docker host <ArrowRight size={15} />
+                  </button>
+                  <span className="connect-preflight">
+                    <Shield size={12} /> Host credentials stay on your own server.
+                  </span>
+                </div>
+                <div className="connect-art" aria-hidden="true">
+                  <div className="orbit orbit--outer" />
+                  <div className="orbit orbit--inner" />
+                  <div className="orbit-center">
+                    <ShipWheel size={31} strokeWidth={1.5} />
+                  </div>
+                  <span className="orbit-terminal">
+                    <Terminal size={12} />
+                  </span>
+                  <span className="orbit-container">
+                    <Container size={12} />
+                  </span>
+                  <span className="orbit-shield">
+                    <ShieldCheck size={12} />
+                  </span>
+                  <span className="orbit-server">
+                    <Server size={12} />
+                  </span>
+                  <span className="orbit-satellite" />
+                </div>
+              </section>
+              <div className="lower-grid">
+                <section className="panel panel--activity">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-eyebrow">WHAT’S HAPPENING</p>
+                      <h3>Recent activity</h3>
+                    </div>
+                    <span className="panel-icon">
+                      <Activity size={16} />
+                    </span>
+                  </div>
+                  <div className="quiet-empty">
+                    <span className="quiet-empty-icon">
+                      <Activity size={17} />
+                    </span>
+                    <span>
+                      <strong>The log is quiet.</strong>
+                      <span>Host and container events will appear here.</span>
+                    </span>
+                    <span className="empty-line" />
+                  </div>
+                </section>
+                <section className="panel panel--health">
+                  <div className="panel-header">
+                    <div>
+                      <p className="panel-eyebrow">SYSTEM STATUS</p>
+                      <h3>System health</h3>
+                    </div>
+                    <span className="panel-icon panel-icon--green">
+                      <ShieldCheck size={16} />
+                    </span>
+                  </div>
+                  <div className="health-row">
+                    <span className="health-indicator health-indicator--green" />
+                    <span className="health-row-label">DockPilot API</span>
+                    <span className={`health-status health-status--${serverStatus}`}>
+                      {serverStatus === 'online'
+                        ? 'Connected'
+                        : serverStatus === 'offline'
+                          ? 'Disconnected'
+                          : 'Checking'}
+                    </span>
+                    <Check
+                      size={14}
+                      className={`health-check ${serverStatus !== 'online' ? 'health-check--hidden' : ''}`}
+                    />
+                  </div>
+                  <div className="health-row">
+                    <span className="health-indicator health-indicator--blue" />
+                    <span className="health-row-label">Authentication</span>
+                    <span className="health-status health-status--green">Secured</span>
+                    <Fingerprint size={15} className="health-check" />
+                  </div>
+                  <div className="health-row">
+                    <span className="health-indicator health-indicator--amber" />
+                    <span className="health-row-label">Host agents</span>
+                    <span className="health-status health-status--muted">Not connected</span>
+                    <Radio size={14} className="health-check health-check--muted" />
+                  </div>
+                  <div className="health-footer">
+                    <ShieldCheck size={13} /> Your account and session are protected.
+                  </div>
+                </section>
               </div>
-              <div className="health-row">
-                <span className="health-indicator health-indicator--amber" />
-                <span className="health-row-label">Host agents</span>
-                <span className="health-status health-status--muted">Not connected</span>
-                <Radio size={14} className="health-check health-check--muted" />
-              </div>
-              <div className="health-footer">
-                <ShieldCheck size={13} /> Your account and session are protected.
-              </div>
-            </section>
-          </div>
-          <footer className="dashboard-footer">
-            <span>
-              DOCKPILOT<span className="brand-dot">.</span>{' '}
-              <span className="dashboard-footer-light">DOCKER, WITHOUT THE GUESSING.</span>
-            </span>
-            <span>
-              <span className="live-dot" /> API{' '}
-              {serverStatus === 'online'
-                ? 'CONNECTED'
-                : serverStatus === 'offline'
-                  ? 'OFFLINE'
-                  : 'CONNECTING'}{' '}
-              <span className="date-separator">/</span> DEVELOPMENT PREVIEW
-            </span>
-          </footer>
+              <footer className="dashboard-footer">
+                <span>
+                  DOCKPILOT<span className="brand-dot">.</span>{' '}
+                  <span className="dashboard-footer-light">DOCKER, WITHOUT THE GUESSING.</span>
+                </span>
+                <span>
+                  <span className="live-dot" /> API{' '}
+                  {serverStatus === 'online'
+                    ? 'CONNECTED'
+                    : serverStatus === 'offline'
+                      ? 'OFFLINE'
+                      : 'CONNECTING'}{' '}
+                  <span className="date-separator">/</span> DEVELOPMENT PREVIEW
+                </span>
+              </footer>
+            </>
+          ) : (
+            <AdminControl section={section} user={user} />
+          )}
         </div>
       </main>
     </div>
+  );
+}
+
+function sectionTitle(section: ConsoleSection): string {
+  if (section === 'ai-credentials') return 'AI credentials';
+  if (section === 'audit-log') return 'AI activity';
+  if (section === 'approvals') return 'Approvals';
+  return 'Overview';
+}
+
+function SectionNavItem({
+  icon: Icon,
+  title,
+  active,
+  onSelect,
+}: {
+  icon: LucideIcon;
+  title: string;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`nav-item nav-item--button${active ? ' nav-item--active' : ''}`}
+      aria-current={active ? 'page' : undefined}
+      onClick={onSelect}
+    >
+      <span className="nav-icon">
+        <Icon size={17} />
+      </span>
+      {title}
+    </button>
   );
 }
 

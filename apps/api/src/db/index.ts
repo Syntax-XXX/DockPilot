@@ -25,6 +25,10 @@ export const sql = postgres(connectionString, {
 
 export const db = drizzle(sql, { schema });
 export type Database = typeof db;
+export type DbExecutor = Pick<
+  Database,
+  'select' | 'insert' | 'update' | 'delete' | 'execute' | 'transaction'
+>;
 
 export async function closeDatabase(): Promise<void> {
   await sql.end({ timeout: 5 });

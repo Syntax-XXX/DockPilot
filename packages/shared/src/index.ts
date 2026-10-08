@@ -1,8 +1,12 @@
 import { z } from 'zod';
+import {
+  agentProtocolVersionSchema,
+  emailSchema,
+  idSchema,
+  memberRoleSchema,
+} from './primitives.js';
 
-export const idSchema = z.uuid();
-export const emailSchema = z.string().trim().toLowerCase().pipe(z.email().max(254));
-export const agentProtocolVersionSchema = z.literal(1);
+export * from './primitives.js';
 
 export const healthResponseSchema = z
   .object({
@@ -55,7 +59,7 @@ export const safeUserSchema = z
     email: emailSchema,
     name: z.string(),
     organizationId: idSchema,
-    role: z.enum(['owner', 'admin', 'operator', 'viewer']),
+    role: memberRoleSchema,
   })
   .strict();
 
@@ -80,3 +84,6 @@ export type SetupAccountInput = z.infer<typeof setupAccountSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type SafeUser = z.infer<typeof safeUserSchema>;
 export type AgentHello = z.infer<typeof agentHelloSchema>;
+
+export * from './control.js';
+export * from './mcp.js';

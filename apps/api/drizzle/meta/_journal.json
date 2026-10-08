@@ -8,6 +8,13 @@
       "when": 1791448800000,
       "tag": "0000_base",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791462691248,
+      "tag": "0001_mcp_control_layer",
+      "breakpoints": true
     }
   ]
 }

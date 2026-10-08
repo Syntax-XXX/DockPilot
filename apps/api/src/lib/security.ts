@@ -31,6 +31,15 @@ const runtimeEnvSchema = z.object({
     );
   }, 'WEB_ORIGIN must be the canonical origin without a path, credentials, or query string'),
   TRUSTED_PROXY: z.enum(['true', 'false']).default('false'),
+  MCP_ENABLED: z.enum(['true', 'false']).default('true'),
+  MCP_TOKEN_SECRET: z
+    .string()
+    .min(32)
+    .refine(
+      (value) => !/example|change|replace|development-only/iu.test(value),
+      'MCP_TOKEN_SECRET must be a unique, randomly generated secret',
+    )
+    .optional(),
 });
 
 const parsedEnv = runtimeEnvSchema.safeParse(process.env);
@@ -42,6 +51,15 @@ export const env = Object.freeze(parsedEnv.data);
 if (env.NODE_ENV === 'production' && new URL(env.WEB_ORIGIN).protocol !== 'https:') {
   throw new Error('Production WEB_ORIGIN must use HTTPS.');
 }
+
+if (env.NODE_ENV === 'production' && env.MCP_ENABLED === 'true' && !env.MCP_TOKEN_SECRET) {
+  throw new Error('MCP_TOKEN_SECRET is required in production while the MCP endpoint is enabled.');
+}
+
+export const mcpEnabled = env.MCP_ENABLED === 'true';
+export const mcpTokenSecret =
+  env.MCP_TOKEN_SECRET ??
+  createHmac('sha256', env.SESSION_SECRET).update('dockpilot/mcp-token-secret/v1').digest('hex');
 
 export const secureCookies = env.NODE_ENV === 'production';
 export const sessionSecret = env.SESSION_SECRET;

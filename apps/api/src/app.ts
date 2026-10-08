@@ -3,6 +3,10 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { healthResponseSchema } from '@dockpilot/shared';
 import { authRoutes, installSessionAuthentication } from './routes/auth.js';
+import { administratorRoutes } from './routes/admin.js';
+import { registerMcpRoutes } from './mcp/routes.js';
+import { isMcpRequestUrl } from './mcp/paths.js';
+import { isAppError } from './lib/errors.js';
 import { env, sessionMaxAgeSeconds } from './lib/security.js';
 
 export async function buildApp() {
@@ -73,6 +77,7 @@ export async function buildApp() {
     reply.removeHeader('Server');
     reply.removeHeader('X-Powered-By');
     if (
+      !isMcpRequestUrl(_request.url) &&
       _request.method !== 'GET' &&
       _request.method !== 'HEAD' &&
       _request.url !== '/api/v1/health'
@@ -100,8 +105,6 @@ export async function buildApp() {
     },
   );
 
-  await app.register(authRoutes, { prefix: '/api/v1/auth' });
-
   app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({
       error: 'NOT_FOUND',
@@ -118,6 +121,15 @@ export async function buildApp() {
         message: 'The request did not match the expected schema.',
       });
     }
+    if (isAppError(error)) {
+      if (error.retryAfterSeconds !== undefined) {
+        reply.header('Retry-After', String(error.retryAfterSeconds));
+      }
+      if (error.category === 'internal') {
+        request.log.error({ err: error }, 'DockPilot request failed');
+      }
+      return reply.code(error.httpStatus).send({ error: error.code, message: error.message });
+    }
     if (statusCode === 413) {
       return reply.code(413).send({
         error: 'PAYLOAD_TOO_LARGE',
@@ -128,6 +140,12 @@ export async function buildApp() {
       return reply
         .code(429)
         .send({ error: 'RATE_LIMITED', message: 'Too many requests. Please try again later.' });
+    }
+    if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
+      return reply.code(statusCode).send({
+        error: 'BAD_REQUEST',
+        message: 'The request could not be processed.',
+      });
     }
     request.log.error({ err: error }, 'DockPilot request failed');
     return reply.code(500).send({
@@ -148,6 +166,12 @@ export async function buildApp() {
     }
     return payload;
   });
+
+  await app.register(authRoutes, { prefix: '/api/v1/auth' });
+
+  await app.register(administratorRoutes, { prefix: '/api/v1/admin' });
+
+  await app.register(registerMcpRoutes, { prefix: '/api/v1' });
 
   return app;
 }

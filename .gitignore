@@ -4,6 +4,7 @@ coverage/
 .turbo/
 *.tsbuildinfo
 .env
+.freebuff
 .env.*
 !.env.example
 !.env.production.example

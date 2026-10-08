@@ -19,6 +19,7 @@ import {
   verifyMutationRequest,
 } from '../lib/security.js';
 import { writeAuditEvent } from '../lib/audit.js';
+import { isMcpRequestUrl } from '../mcp/paths.js';
 import { clearSessionCookie, readSessionCookie, setSessionCookie } from '../lib/cookie.js';
 import type { SafeUser } from '@dockpilot/shared';
 
@@ -221,6 +222,7 @@ export function installSessionAuthentication(app: FastifyInstance): void {
   app.decorateRequest('sessionTokenHash', null);
 
   app.addHook('onRequest', async (request, reply) => {
+    if (isMcpRequestUrl(request.url)) return;
     if (
       request.url.startsWith('/api/v1/health') ||
       request.url.startsWith('/api/v1/auth/setup-status')
