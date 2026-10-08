@@ -1,0 +1,14 @@
+{
+  "name": "@dockpilot/wiki",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev src",
+    "build": "vitepress build src",
+    "preview": "vitepress preview .vitepress/dist"
+  },
+  "dependencies": {
+    "vitepress": "^1.6.4"
+  }
+}
