@@ -1,0 +1,33 @@
+{
+  "name": "@dockpilot/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "test:unit": "vitest run --config vitest.config.ts --project unit",
+    "test:integration": "npm run db:migrate && vitest run --config vitest.config.ts --project integration"
+  },
+  "dependencies": {
+    "@dockpilot/shared": "*",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^11.2.0",
+    "@node-rs/argon2": "^2.2.2",
+    "drizzle-orm": "^0.45.3",
+    "fastify": "^5.12.5",
+    "postgres": "^3.4.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "drizzle-kit": "^0.31.11",
+    "fastify-plugin": "^5.0.1",
+    "dotenv": "^18.0.6",
+    "vitest": "^4.1.11"
+  }
+}

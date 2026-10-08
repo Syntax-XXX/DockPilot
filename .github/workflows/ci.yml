@@ -1,0 +1,42 @@
+name: CI
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: dockpilot
+          POSTGRES_USER: dockpilot
+          POSTGRES_PASSWORD: ci-only-not-for-production
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U dockpilot -d dockpilot"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://dockpilot:ci-only-not-for-production@127.0.0.1:54329/dockpilot
+      SESSION_SECRET: integration-test-only-secret-at-least-32-chars-long
+      WEB_ORIGIN: http://127.0.0.1:5173
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run lint
+      - run: npm run format:check

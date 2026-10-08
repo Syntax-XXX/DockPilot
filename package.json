@@ -1,0 +1,58 @@
+{
+  "name": "dockpilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Docker, without the guessing.",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "packages/shared"
+  ],
+  "scripts": {
+    "build:shared": "npm run build --workspace=@dockpilot/shared",
+    "predev": "npm run build:shared",
+    "pretypecheck": "npm run build:shared",
+    "pretest:unit": "npm run build:shared",
+    "pretest:integration": "npm run build:shared",
+    "dev": "concurrently --kill-others -n shared,api,web -c cyan,blue,green \"npm:dev:shared\" \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:shared": "npm run dev --workspace=@dockpilot/shared",
+    "dev:api": "npm run dev --workspace=@dockpilot/api",
+    "dev:web": "npm run dev --workspace=@dockpilot/web",
+    "db:up": "docker compose -f infrastructure/compose.yaml up -d postgres",
+    "db:down": "docker compose -f infrastructure/compose.yaml down",
+    "db:logs": "docker compose -f infrastructure/compose.yaml logs -f postgres",
+    "db:migrate": "npm run db:migrate --workspace=@dockpilot/api",
+    "db:generate": "npm run db:generate --workspace=@dockpilot/api",
+    "db:setup": "npm run db:up && npm run db:migrate",
+    "typecheck": "npm run typecheck --workspace=@dockpilot/shared && npm run typecheck --workspace=@dockpilot/api && npm run typecheck --workspace=@dockpilot/web",
+    "lint": "eslint apps packages --max-warnings=0",
+    "test:unit": "npm run test:unit --workspace=@dockpilot/api",
+    "test:integration": "npm run test:integration --workspace=@dockpilot/api",
+    "test": "npm run test:unit && npm run test:integration",
+    "build": "npm run build --workspace=@dockpilot/shared && npm run build --workspace=@dockpilot/api && npm run build --workspace=@dockpilot/web",
+    "format:check": "prettier --check . --ignore-unknown",
+    "format": "prettier --write . --ignore-unknown"
+  },
+  "overrides": {
+    "shell-quote": "^1.11.0",
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.12"
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/node": "^22.19.0",
+    "concurrently": "^9.2.4",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "prettier": "^3.7.4",
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.48.1"
+  }
+}

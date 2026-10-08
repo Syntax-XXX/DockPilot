@@ -1,0 +1,3 @@
+# Drizzle Kit writes migration snapshots in its own stable format and rewrites them on every
+# `npm run db:generate`. They are generated artifacts, so they are excluded from style checks.
+apps/api/drizzle/meta/*_snapshot.json
