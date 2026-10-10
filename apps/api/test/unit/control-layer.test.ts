@@ -31,9 +31,11 @@ import {
   demuxDockerLogs,
   DockerApiError,
   containerLogs,
+  dockerVersion,
+  inspectContainer,
   socketExists,
 } from '../../src/lib/docker.js';
-import { createServer } from 'node:net';
+import { createServer, type Socket } from 'node:net';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -246,6 +248,64 @@ describe('Docker socket validation', () => {
       expect(socketExists(filePath)).toBe(false);
       expect(socketExists(path.join(directory, 'missing.sock'))).toBe(false);
     } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Docker API request timeout enforcement', () => {
+  it('aborts a JSON Docker request that accepts the socket but never responds', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'dockpilot-docker-api-timeout-'));
+    const socketPath = path.join(directory, 'docker.sock');
+    const sockets: Socket[] = [];
+    // Accepts the connection and never sends a byte back, so only the client-side
+    // timeout can settle the request.
+    const server = createServer((socket) => {
+      sockets.push(socket);
+      socket.on('data', () => undefined);
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const startedAt = performance.now();
+
+    try {
+      await expect(dockerVersion({ kind: 'unix', socketPath })).rejects.toMatchObject({
+        name: 'DockerConnectionError',
+      });
+      // The configured default is 5s; the request must settle close to it, and never hang.
+      expect(performance.now() - startedAt).toBeLessThan(6000);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('aborts inspectContainer and settles with a connection error when the socket stalls', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'dockpilot-docker-inspect-timeout-'));
+    const socketPath = path.join(directory, 'docker.sock');
+    const sockets: Socket[] = [];
+    const server = createServer((socket) => {
+      sockets.push(socket);
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+    try {
+      await expect(
+        inspectContainer({ kind: 'unix', socketPath }, 'a'.repeat(64)),
+      ).rejects.toMatchObject({ name: 'DockerConnectionError' });
+    } finally {
+      for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error) reject(error);

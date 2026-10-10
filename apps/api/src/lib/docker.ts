@@ -174,6 +174,7 @@ async function dockerRequest(
 ): Promise<{ status: number; body: unknown; rawBody: string; headers: http.IncomingHttpHeaders }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => {
+    settleReject(new DockerConnectionError('Docker request timed out.'));
     controller.abort();
   }, timeoutMs);
 
@@ -185,6 +186,24 @@ async function dockerRequest(
     headers: http.IncomingHttpHeaders;
   }) => void;
   let rejectPromise: (reason: Error) => void;
+  let settled = false;
+  const settleResolve = (value: {
+    status: number;
+    body: unknown;
+    rawBody: string;
+    headers: http.IncomingHttpHeaders;
+  }): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    resolvePromise(value);
+  };
+  const settleReject = (reason: Error): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    rejectPromise(reason);
+  };
   const promise = new Promise<{
     status: number;
     body: unknown;
@@ -205,6 +224,7 @@ async function dockerRequest(
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       },
       timeout: timeoutMs,
+      signal: controller.signal,
     };
 
     req = http.request(options, (res) => {
@@ -215,7 +235,7 @@ async function dockerRequest(
         totalBytes += chunk.length;
         if (totalBytes > DOCKER_MAX_RESPONSE_BYTES) {
           res.destroy();
-          rejectPromise(
+          settleReject(
             new DockerApiError(res.statusCode ?? 500, 'Docker response exceeded the allowed size.'),
           );
           return;
@@ -231,12 +251,12 @@ async function dockerRequest(
           try {
             const errBody = JSON.parse(rawBody || '{}') as { message?: unknown };
             if (typeof errBody.message === 'string') {
-              rejectPromise(new DockerApiError(status, errBody.message));
+              settleReject(new DockerApiError(status, errBody.message));
             } else {
-              rejectPromise(new DockerApiError(status, 'Unknown Docker error'));
+              settleReject(new DockerApiError(status, 'Unknown Docker error'));
             }
           } catch {
-            rejectPromise(new DockerApiError(status, 'Unknown Docker error'));
+            settleReject(new DockerApiError(status, 'Unknown Docker error'));
           }
           return;
         }
@@ -252,16 +272,16 @@ async function dockerRequest(
           }
         }
 
-        resolvePromise({ status, body: parsedBody, rawBody, headers: res.headers });
+        settleResolve({ status, body: parsedBody, rawBody, headers: res.headers });
       });
 
       res.on('error', (err) => {
-        rejectPromise(err);
+        settleReject(err);
       });
     });
 
     req.on('error', (err) => {
-      rejectPromise(err);
+      settleReject(err);
     });
 
     if (body !== undefined) {

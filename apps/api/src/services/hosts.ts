@@ -9,8 +9,7 @@ import {
 } from '../lib/docker.js';
 import { keysetAfter } from '../lib/keyset.js';
 import { decodeCursor, encodeCursor } from '../lib/pagination.js';
-import { internalError, notFoundError, validationError } from '../lib/errors.js';
-import { randomBytes } from 'node:crypto';
+import { conflictError, internalError, notFoundError, validationError } from '../lib/errors.js';
 import type { HostView, CreateHostInput, HostStatus, ContainerView } from '@dockpilot/shared';
 
 interface HostRow {
@@ -91,15 +90,12 @@ export interface CreateHostServiceInput extends CreateHostInput {
   executor?: DbExecutor;
 }
 
-export async function createHost(
-  input: CreateHostServiceInput,
-): Promise<{ host: HostView; token: string }> {
+export async function createHost(input: CreateHostServiceInput): Promise<{ host: HostView }> {
   const executor = input.executor ?? db;
   const endpoint = parseDockerEndpoint(input.endpoint);
   const version = await verifyDockerSocket(endpoint);
   const dockerVersionStr = `${version.Version}@${version.Arch}`;
 
-  const generated = generateHostToken();
   const inserted = await executor
     .insert(hostsTable)
     .values({
@@ -119,7 +115,7 @@ export async function createHost(
   const row = inserted[0];
   if (!row) throw internalError('Host creation failed.');
 
-  return { host: toHostView(row), token: generated.token };
+  return { host: toHostView(row) };
 }
 
 export interface ListHostsInput {
@@ -304,6 +300,22 @@ export async function hostExists(input: {
   return rows.length > 0;
 }
 
+/**
+ * Loads a host and refuses it when an administrator has disabled it, so disabling a host
+ * also suspends every Docker operation that would otherwise reach the engine through it.
+ */
+export async function getOperableHost(input: {
+  organizationId: string;
+  hostId: string;
+  executor?: DbExecutor;
+}): Promise<HostView> {
+  const host = await getHost(input);
+  if (host.status === 'disabled') {
+    throw conflictError(`Host ${host.name} is disabled. Enable it before running Docker actions.`);
+  }
+  return host;
+}
+
 export interface RefreshHostInput {
   organizationId: string;
   hostId: string;
@@ -313,6 +325,10 @@ export interface RefreshHostInput {
 export async function refreshHost(input: RefreshHostInput): Promise<HostView> {
   const executor = input.executor ?? db;
   const host = await getHost({ ...input, executor });
+
+  // A disabled host stays disabled until an administrator explicitly enables it, even if the
+  // Docker engine answers a probe.
+  if (host.status === 'disabled') return host;
 
   const endpoint = parseDockerEndpoint(host.endpoint);
 
@@ -357,7 +373,7 @@ export async function syncHostContainers(
   input: SyncHostContainersInput,
 ): Promise<{ synced: number }> {
   const executor = input.executor ?? db;
-  const host = await getHost({ ...input, executor });
+  const host = await getOperableHost(input);
 
   const endpoint = parseDockerEndpoint(host.endpoint);
   const dockerContainers = await listContainers(endpoint, true);
@@ -377,21 +393,13 @@ export async function syncHostContainers(
   const existingMap = new Map(existingContainers.map((c) => [c.containerId, c.id]));
 
   const newContainers: (typeof containersTable.$inferInsert)[] = [];
+  const now = new Date();
 
   for (const dc of dockerContainers) {
-    const existingId = existingMap.get(dc.Id);
-    if (existingId) {
-      existingMap.delete(dc.Id);
-      continue;
-    }
     const firstName = dc.Names[0];
     const shortId = firstName ? firstName.slice(1) : null;
     const name = firstName && firstName !== '/' ? firstName : null;
-    newContainers.push({
-      organizationId: input.organizationId,
-      hostId: input.hostId,
-      containerId: dc.Id,
-      shortId: shortId ? shortId.slice(0, 12) : null,
+    const fields = {
       name,
       image: dc.Image,
       state: dc.State as
@@ -400,7 +408,24 @@ export async function syncHostContainers(
       created: dc.Created.toString(),
       labels: dc.Labels,
       ports: dc.Ports,
-      syncedAt: new Date(),
+      syncedAt: now,
+    };
+
+    const existingId = existingMap.get(dc.Id);
+    if (existingId) {
+      // Refresh the stored state for a container DockPilot already knows about so a
+      // re-sync reports the engine's current state instead of the first-seen state.
+      await executor.update(containersTable).set(fields).where(eq(containersTable.id, existingId));
+      existingMap.delete(dc.Id);
+      continue;
+    }
+
+    newContainers.push({
+      organizationId: input.organizationId,
+      hostId: input.hostId,
+      containerId: dc.Id,
+      shortId: shortId ? shortId.slice(0, 12) : null,
+      ...fields,
     });
   }
 
@@ -473,10 +498,4 @@ function toContainerView(row: typeof containersTable.$inferSelect): ContainerVie
     ports: row.ports,
     syncedAt: row.syncedAt.toISOString(),
   };
-}
-
-function generateHostToken(): { token: string; tokenPrefix: string } {
-  const token = `dph_${randomBytes(32).toString('base64url')}`;
-  const tokenPrefix = token.slice(0, 'dph_'.length + 8);
-  return { token, tokenPrefix };
 }

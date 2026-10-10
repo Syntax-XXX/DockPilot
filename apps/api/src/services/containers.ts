@@ -12,7 +12,7 @@ import {
 import { keysetAfter } from '../lib/keyset.js';
 import { decodeCursor, encodeCursor } from '../lib/pagination.js';
 import { notFoundError, validationError } from '../lib/errors.js';
-import { getHost } from './hosts.js';
+import { getOperableHost } from './hosts.js';
 import type { ContainerView, ContainerLogView } from '@dockpilot/shared';
 
 const containerColumns = {
@@ -122,7 +122,7 @@ export async function containerLog(input: ContainerLogInput): Promise<ContainerL
   const executor = input.executor ?? db;
   const container = await getContainer({ ...input, executor });
 
-  const host = await getHost({
+  const host = await getOperableHost({
     organizationId: input.organizationId,
     hostId: container.hostId,
     executor,
@@ -138,7 +138,7 @@ async function resolveHostEndpoint(
   executor: DbExecutor,
 ): Promise<{ container: ContainerView; endpoint: ReturnType<typeof parseDockerEndpoint> }> {
   const container = await getContainer({ ...input, executor });
-  const host = await getHost({
+  const host = await getOperableHost({
     organizationId: input.organizationId,
     hostId: container.hostId,
     executor,
@@ -187,7 +187,7 @@ export async function removeContainer(input: {
   const executor = input.executor ?? db;
   const container = await getContainer({ ...input, executor });
 
-  const host = await getHost({
+  const host = await getOperableHost({
     organizationId: input.organizationId,
     hostId: container.hostId,
     executor,

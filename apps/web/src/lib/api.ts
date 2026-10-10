@@ -279,7 +279,7 @@ export function fetchHosts(cursor?: string): Promise<HostPage> {
   return requestAdmin(`/hosts${query}`, {}, hostListResponseSchema);
 }
 
-export function createHost(input: CreateHostInput): Promise<{ host: HostView; token: string }> {
+export function createHost(input: CreateHostInput): Promise<{ host: HostView }> {
   return requestAdmin(
     '/hosts',
     { method: 'POST', body: JSON.stringify(input) },

@@ -441,7 +441,7 @@
         resultSummary: { created: true },
       });
       save();
-      return json({ host, token: `dph_demo_${makeId().slice(0, 16)}` }, 201);
+      return json({ host }, 201);
     }
     const hostMatch = path.match(/^\/api\/v1\/admin\/hosts\/([^/]+)$/);
     if (hostMatch && method === 'GET') {

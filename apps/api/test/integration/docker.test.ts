@@ -111,9 +111,8 @@ async function registerHost(cookie: string, name = 'fixture-host'): Promise<stri
     endpoint: fixture.endpoint,
   });
   expect(response.statusCode).toBe(201);
-  const body = response.json<{ host: { id: string; endpoint: string }; token: string }>();
+  const body = response.json<{ host: { id: string; endpoint: string } }>();
   expect(body.host.endpoint).toBe(fixture.endpoint);
-  expect(body.token.startsWith('dph_')).toBe(true);
   return body.host.id;
 }
 
@@ -210,6 +209,63 @@ describe('host and container REST surface', () => {
 
     // Unauthenticated is rejected.
     expect((await adminGet('/hosts', 'dockpilot_session=none')).statusCode).toBe(401);
+  }, 30_000);
+
+  it('blocks Docker operations and re-enablement for a disabled host', async () => {
+    const hostId = await registerHost(ownerCookie);
+    await syncHost(ownerCookie, hostId);
+
+    const disabled = await adminSend('POST', `/hosts/${hostId}/disable`, ownerCookie);
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json<{ status: string }>().status).toBe('disabled');
+
+    // Reading the stored inventory is still allowed; nothing reaches the Docker engine.
+    expect((await adminGet(`/hosts/${hostId}/containers`, ownerCookie)).statusCode).toBe(200);
+
+    // Re-syncing, operating a container and reading logs all refuse a disabled host.
+    expect((await adminSend('POST', `/hosts/${hostId}/sync`, ownerCookie)).statusCode).toBe(409);
+    expect(
+      (await adminSend('POST', `/containers/${containerId}/start`, ownerCookie)).statusCode,
+    ).toBe(409);
+    expect((await adminGet(`/containers/${containerId}/logs`, ownerCookie)).statusCode).toBe(409);
+
+    // Refresh returns the host unchanged and must not silently revive a disabled host.
+    expect((await adminSend('POST', `/hosts/${hostId}/refresh`, ownerCookie)).statusCode).toBe(200);
+    const reread = await adminGet(`/hosts/${hostId}`, ownerCookie);
+    expect(reread.json<{ status: string }>().status).toBe('disabled');
+
+    // Only an explicit enable restores operations.
+    expect((await adminSend('POST', `/hosts/${hostId}/enable`, ownerCookie)).statusCode).toBe(200);
+    expect((await adminSend('POST', `/hosts/${hostId}/sync`, ownerCookie)).statusCode).toBe(200);
+  }, 30_000);
+
+  it('refreshes the stored state of already-known containers on a later sync', async () => {
+    const hostId = await registerHost(ownerCookie);
+    await syncHost(ownerCookie, hostId);
+
+    const before = await adminGet(`/containers/${containerId}`, ownerCookie);
+    expect(before.statusCode).toBe(200);
+    expect(before.json<{ container: { state: string } }>().container.state).toBe('running');
+
+    // The engine now reports the container as exited.
+    const fixtureContainer = fixture.containers[0];
+    if (!fixtureContainer) throw new Error('Expected the fixture to expose a container.');
+    fixtureContainer.state = 'exited';
+    fixtureContainer.status = 'Exited (0) 1 second ago';
+    const resync = await adminSend('POST', `/hosts/${hostId}/sync`, ownerCookie);
+    expect(resync.statusCode).toBe(200);
+    // No new containers were discovered; state is refreshed in place.
+    expect(resync.json<{ synced: number }>().synced).toBe(0);
+
+    const after = await adminGet(`/containers/${containerId}`, ownerCookie);
+    expect(after.json<{ container: { state: string; status: string } }>().container.state).toBe(
+      'exited',
+    );
+    expect(after.json<{ container: { status: string } }>().container.status).toBe(
+      'Exited (0) 1 second ago',
+    );
+    // Still exactly one stored row: the update did not duplicate the container.
+    expect(await client`SELECT id FROM containers`).toHaveLength(1);
   }, 30_000);
 
   it('keeps hosts organization-scoped', async () => {

@@ -169,7 +169,6 @@ function HostsPanel({
   const [endpoint, setEndpoint] = useState('unix:///var/run/docker.sock');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [hostToken, setHostToken] = useState<string | null>(null);
   const canManage = isManager(user);
   const canOperate = isOperator(user);
 
@@ -201,7 +200,6 @@ function HostsPanel({
         endpoint,
         ...(description.trim() === '' ? {} : { description }),
       });
-      setHostToken(created.token);
       setName('');
       setDescription('');
       setShowForm(false);
@@ -266,11 +264,6 @@ function HostsPanel({
         }
       />
       {error !== null && <PanelNotice tone="error">{error}</PanelNotice>}
-      {hostToken !== null && (
-        <PanelNotice tone="info">
-          Host credential (shown once): <code className="admin-mono">{hostToken}</code>
-        </PanelNotice>
-      )}
       {showForm && canManage && (
         <form className="admin-form" onSubmit={(event) => void submit(event)} noValidate>
           <div className="admin-form-grid">

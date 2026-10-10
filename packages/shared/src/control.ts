@@ -288,7 +288,6 @@ export const createHostInputSchema = z
 export const createHostResponseSchema = z
   .object({
     host: hostViewSchema,
-    token: z.string(),
   })
   .strict();
 
