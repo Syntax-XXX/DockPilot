@@ -4,6 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import { healthResponseSchema } from '@dockpilot/shared';
 import { authRoutes, installSessionAuthentication } from './routes/auth.js';
 import { administratorRoutes } from './routes/admin.js';
+import { dockerRoutes } from './routes/docker.js';
 import { registerMcpRoutes } from './mcp/routes.js';
 import { isMcpRequestUrl } from './mcp/paths.js';
 import { isAppError } from './lib/errors.js';
@@ -170,6 +171,8 @@ export async function buildApp() {
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
 
   await app.register(administratorRoutes, { prefix: '/api/v1/admin' });
+
+  await app.register(dockerRoutes, { prefix: '/api/v1/admin' });
 
   await app.register(registerMcpRoutes, { prefix: '/api/v1' });
 

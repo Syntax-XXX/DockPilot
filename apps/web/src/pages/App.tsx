@@ -38,10 +38,11 @@ import {
   ApiError,
 } from '../lib/api.js';
 import { AdminControl, isAdministrator, type AdminSection } from './AdminControl.js';
+import { DockerControl, type DockerSection } from './DockerControl.js';
 import type { SafeUser } from '@dockpilot/shared';
 
 type LoadState = 'loading' | 'ready' | 'error';
-type ConsoleSection = 'overview' | AdminSection;
+type ConsoleSection = 'overview' | DockerSection | AdminSection;
 type ServerStatus = 'checking' | 'online' | 'offline';
 type AuthMode = 'setup' | 'login';
 interface OperationalStatus {
@@ -574,6 +575,8 @@ function OperatorConsole({
 }) {
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [section, setSection] = useState<ConsoleSection>('overview');
+  const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
+  const [dockerNotice, setDockerNotice] = useState<string | null>(null);
   const [operationalStatus, setOperationalStatus] = useState<OperationalStatus>({
     database: 'loading',
     mcpEnabled: null,
@@ -664,8 +667,22 @@ function OperatorConsole({
             }}
           />
           <span className="nav-section-label nav-section-label--spaced">RESOURCES</span>
-          <NavItem icon={Server} title="Hosts" />
-          <NavItem icon={Container} title="Containers" />
+          <SectionNavItem
+            icon={Server}
+            title="Hosts"
+            active={section === 'hosts'}
+            onSelect={() => {
+              setSection('hosts');
+            }}
+          />
+          <SectionNavItem
+            icon={Container}
+            title="Containers"
+            active={section === 'containers'}
+            onSelect={() => {
+              setSection('containers');
+            }}
+          />
           <NavItem icon={Box} title="Images" />
           <NavItem icon={Database} title="Volumes" />
           <NavItem icon={Network} title="Networks" />
@@ -793,6 +810,17 @@ function OperatorConsole({
           {globalError && (
             <button className="console-error-banner" onClick={clearGlobalError} role="alert">
               <TriangleAlert size={15} /> {globalError} <span>×</span>
+            </button>
+          )}
+          {dockerNotice !== null && (
+            <button
+              className="console-notice-banner"
+              onClick={() => {
+                setDockerNotice(null);
+              }}
+              role="status"
+            >
+              <ShieldCheck size={15} /> {dockerNotice} <span>×</span>
             </button>
           )}
           {section === 'overview' ? (
@@ -929,29 +957,29 @@ function OperatorConsole({
               {showAdministrativeStatus(
                 <div className="lower-grid">
                   <section className="panel panel--activity">
-                  <div className="panel-header">
-                    <div>
-                      <p className="panel-eyebrow">WHAT’S HAPPENING</p>
-                      <h3>Recent activity</h3>
-                    </div>
-                    <span className="panel-icon">
-                      <Activity size={16} />
-                    </span>
-                  </div>
-                  <div className="quiet-empty">
-                    <span className="quiet-empty-icon">
-                      <Activity size={17} />
-                    </span>
-                    <span>
-                      <strong>The log is quiet.</strong>
-                      <span>
-                        An administrator can review AI tool calls, decisions, and security events in
-                        the AI activity view.
+                    <div className="panel-header">
+                      <div>
+                        <p className="panel-eyebrow">WHAT’S HAPPENING</p>
+                        <h3>Recent activity</h3>
+                      </div>
+                      <span className="panel-icon">
+                        <Activity size={16} />
                       </span>
-                    </span>
-                    <span className="empty-line" />
-                  </div>
-                </section>
+                    </div>
+                    <div className="quiet-empty">
+                      <span className="quiet-empty-icon">
+                        <Activity size={17} />
+                      </span>
+                      <span>
+                        <strong>The log is quiet.</strong>
+                        <span>
+                          An administrator can review AI tool calls, decisions, and security events
+                          in the AI activity view.
+                        </span>
+                      </span>
+                      <span className="empty-line" />
+                    </div>
+                  </section>
                   <section
                     className="panel panel--health"
                     aria-busy={administrator && statusRefreshing}
@@ -1051,9 +1079,9 @@ function OperatorConsole({
                       <span className="health-status health-status--muted">Not implemented</span>
                       <Radio size={14} className="health-check health-check--muted" />
                     </div>
-                  <div className="health-footer">
-                    <ShieldCheck size={13} /> Your account and session are protected.
-                  </div>
+                    <div className="health-footer">
+                      <ShieldCheck size={13} /> Your account and session are protected.
+                    </div>
                   </section>
                 </div>,
               )}
@@ -1063,7 +1091,9 @@ function OperatorConsole({
                   <span className="dashboard-footer-light">DOCKER, WITHOUT THE GUESSING.</span>
                 </span>
                 <span>
-                  <span className={`live-dot${serverStatus === 'offline' ? ' live-dot--offline' : ''}`} />{' '}
+                  <span
+                    className={`live-dot${serverStatus === 'offline' ? ' live-dot--offline' : ''}`}
+                  />{' '}
                   API{' '}
                   {serverStatus === 'online'
                     ? 'CONNECTED'
@@ -1074,6 +1104,17 @@ function OperatorConsole({
                 </span>
               </footer>
             </>
+          ) : section === 'hosts' || section === 'containers' ? (
+            <DockerControl
+              section={section}
+              user={user}
+              selectedHostId={selectedHostId}
+              onSelectHost={setSelectedHostId}
+              onNavigate={setSection}
+              notify={(message) => {
+                setDockerNotice(message);
+              }}
+            />
           ) : (
             <AdminControl section={section} user={user} />
           )}
@@ -1099,6 +1140,8 @@ function sectionTitle(section: ConsoleSection): string {
   if (section === 'ai-credentials') return 'AI credentials';
   if (section === 'audit-log') return 'AI activity';
   if (section === 'approvals') return 'Approvals';
+  if (section === 'hosts') return 'Hosts';
+  if (section === 'containers') return 'Containers';
   return 'Overview';
 }
 

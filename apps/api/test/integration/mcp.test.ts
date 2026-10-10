@@ -186,7 +186,9 @@ describe('MCP tool discovery', () => {
       .map((tool) => tool.name)
       .sort();
     expect(destructive).toEqual([
+      'dockpilot_request_container_removal',
       'dockpilot_request_credential_revocation',
+      'dockpilot_request_host_removal',
       'dockpilot_request_session_revocation',
     ]);
     const readOnly = listing.tools

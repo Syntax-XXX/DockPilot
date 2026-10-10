@@ -180,7 +180,7 @@ export interface UpdateHostInput {
   organizationId: string;
   hostId: string;
   name?: string;
-  description?: string;
+  description?: string | null;
   endpoint?: string;
   labels?: Record<string, string> | null;
   metadata?: Record<string, unknown> | null;
@@ -286,6 +286,22 @@ export async function removeHost(input: RemoveHostInput): Promise<void> {
     .where(
       and(eq(hostsTable.id, input.hostId), eq(hostsTable.organizationId, input.organizationId)),
     );
+}
+
+export async function hostExists(input: {
+  organizationId: string;
+  hostId: string;
+  executor?: DbExecutor;
+}): Promise<boolean> {
+  const executor = input.executor ?? db;
+  const rows = await executor
+    .select({ id: hostsTable.id })
+    .from(hostsTable)
+    .where(
+      and(eq(hostsTable.id, input.hostId), eq(hostsTable.organizationId, input.organizationId)),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 export interface RefreshHostInput {

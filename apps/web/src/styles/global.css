@@ -1273,6 +1273,78 @@ input:focus-visible {
   font-size: 11px;
   cursor: pointer;
 }
+.console-notice-banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 11px 14px;
+  font-size: 12.6px;
+  text-align: left;
+  color: #cfe6d6;
+  border: 1px solid #2f5d43;
+  border-radius: var(--rounded);
+  background: #16281d;
+  cursor: pointer;
+}
+.console-notice-banner > span {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.admin-select {
+  padding: 7px 11px;
+  font-size: 12.4px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-raised);
+}
+
+.admin-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-row--active {
+  background: var(--panel-raised);
+}
+
+.admin-cell-detail--error {
+  color: #e5928f;
+}
+
+.log-panel {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--rounded);
+  background: var(--panel);
+  overflow: hidden;
+}
+.log-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.6px;
+}
+.log-view {
+  margin: 0;
+  padding: 13px;
+  max-height: 360px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11.6px;
+  line-height: 1.55;
+  color: #c8d4e2;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0d141c;
+}
+
 .console-error-banner > span {
   margin-left: auto;
 }

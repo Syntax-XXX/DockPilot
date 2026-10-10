@@ -12,6 +12,7 @@ import { mcpToolRegistry } from '../../src/mcp/registry.js';
 import { listToolDefinitions } from '../../src/mcp/server.js';
 
 const sampleUuid = 'b7ba6c0e-e4d6-4b2c-88ee-8a7384f43128';
+const sampleContainerId = 'a'.repeat(64);
 
 const forbiddenToolNames = ['execute', 'shell', 'command', 'docker_exec', 'sql', 'run', 'admin'];
 
@@ -32,6 +33,22 @@ const validMinimalInputs: Record<McpToolName, Record<string, unknown>> = {
   dockpilot_request_credential_revocation: {
     credentialId: sampleUuid,
     justification: 'rotate compromised access',
+  },
+  dockpilot_list_hosts: {},
+  dockpilot_get_host: { hostId: sampleUuid },
+  dockpilot_list_containers: { hostId: sampleUuid },
+  dockpilot_get_container_logs: { containerId: sampleContainerId },
+  dockpilot_sync_host_containers: { hostId: sampleUuid },
+  dockpilot_create_host: { name: 'lab-host', endpoint: 'unix:///var/run/docker.sock' },
+  dockpilot_update_host: { hostId: sampleUuid, name: 'renamed-host' },
+  dockpilot_set_container_state: { containerId: sampleContainerId, action: 'start' },
+  dockpilot_request_host_removal: {
+    hostId: sampleUuid,
+    justification: 'retire the host',
+  },
+  dockpilot_request_container_removal: {
+    containerId: sampleContainerId,
+    justification: 'retire the container',
   },
 };
 

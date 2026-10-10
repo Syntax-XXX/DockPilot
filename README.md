@@ -206,6 +206,7 @@ Core variables include:
 - `MCP_ENABLED` — set to `false` to serve no MCP endpoint at all.
 - `MCP_TOKEN_SECRET` — independent HMAC key for AI credential tokens.
 - `HOST`, `API_PORT`, `WEB_PORT`, `WEB_ORIGIN`, `API_PUBLIC_URL`, `TRUSTED_PROXY` — network and origin settings.
+- `DOCKPILOT_DOCKER_SOCKETS` — comma-separated absolute `unix://` socket paths that Docker host registration may use. Defaults to `/var/run/docker.sock,/run/docker.sock`; endpoints outside the allowlist are rejected.
 
 Production requires a unique, cryptographically generated `SESSION_SECRET` and, when MCP is enabled, an independent `MCP_TOKEN_SECRET`. The startup validation rejects placeholder values.
 

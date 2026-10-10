@@ -22,6 +22,22 @@ import {
 } from '../services/ai-credentials.js';
 import { getAuditEvent, listAuditEvents } from '../services/audit-events.js';
 import { createApproval, listApprovals } from '../services/approvals.js';
+import {
+  createHost,
+  getHost,
+  hostExists,
+  listHosts,
+  syncHostContainers,
+  updateHost,
+} from '../services/hosts.js';
+import {
+  containerLog,
+  getContainer,
+  listContainers,
+  restartContainer,
+  startContainer,
+  stopContainer,
+} from '../services/containers.js';
 
 export const defaultToolPageSize = 25;
 
@@ -400,7 +416,336 @@ export const mcpToolRegistry = {
       };
     },
   }),
+
+  dockpilot_list_hosts: createTool({
+    name: 'dockpilot_list_hosts',
+    title: 'List Docker hosts',
+    description:
+      'Lists the Docker hosts registered in the authenticated organization with bounded, keyset-paginated pages.',
+    mutates: false,
+    resourceType: 'host',
+    outputSchema: mcpToolOutputSchemas.dockpilot_list_hosts,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_list_hosts.parse(input);
+      const page = await listHosts({
+        organizationId: context.identity.organizationId,
+        limit: parsed.limit ?? defaultToolPageSize,
+        cursor: parsed.cursor,
+        executor: context.executor,
+      });
+      return { hosts: page.hosts.map(toHostSummary), nextCursor: page.nextCursor };
+    },
+  }),
+
+  dockpilot_get_host: createTool({
+    name: 'dockpilot_get_host',
+    title: 'Get Docker host',
+    description: 'Returns a single registered Docker host from the authenticated organization.',
+    mutates: false,
+    resourceType: 'host',
+    outputSchema: mcpToolOutputSchemas.dockpilot_get_host,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_get_host.parse(input);
+      const host = await getHost({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        executor: context.executor,
+      });
+      return { host: toHostSummary(host) };
+    },
+  }),
+
+  dockpilot_list_containers: createTool({
+    name: 'dockpilot_list_containers',
+    title: 'List host containers',
+    description:
+      'Lists the containers known for a registered Docker host in the authenticated organization.',
+    mutates: false,
+    resourceType: 'container',
+    outputSchema: mcpToolOutputSchemas.dockpilot_list_containers,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_list_containers.parse(input);
+      const page = await listContainers({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        limit: parsed.limit ?? defaultToolPageSize,
+        cursor: parsed.cursor,
+        executor: context.executor,
+      });
+      return { containers: page.containers.map(toContainerSummary), nextCursor: page.nextCursor };
+    },
+  }),
+
+  dockpilot_get_container_logs: createTool({
+    name: 'dockpilot_get_container_logs',
+    title: 'Get container logs',
+    description:
+      'Returns the most recent log lines for a container. The Docker socket allowlist is enforced and output is bounded.',
+    mutates: false,
+    resourceType: 'container',
+    outputSchema: mcpToolOutputSchemas.dockpilot_get_container_logs,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_get_container_logs.parse(input);
+      const log = await containerLog({
+        organizationId: context.identity.organizationId,
+        containerId: parsed.containerId,
+        tail: parsed.tail,
+        executor: context.executor,
+      });
+      return { log };
+    },
+  }),
+
+  dockpilot_sync_host_containers: createTool({
+    name: 'dockpilot_sync_host_containers',
+    title: 'Sync host containers',
+    description:
+      'Reads the container list from the Docker host and reconciles DockPilot’s stored container records for that host.',
+    mutates: true,
+    resourceType: 'host',
+    outputSchema: mcpToolOutputSchemas.dockpilot_sync_host_containers,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_sync_host_containers.parse(input);
+      const result = await syncHostContainers({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        executor: context.executor,
+      });
+      return { synced: result.synced };
+    },
+  }),
+
+  dockpilot_create_host: createTool({
+    name: 'dockpilot_create_host',
+    title: 'Register Docker host',
+    description:
+      'Registers a Docker host by unix socket endpoint. Only endpoints in the operator allowlist are accepted.',
+    mutates: true,
+    resourceType: 'host',
+    outputSchema: mcpToolOutputSchemas.dockpilot_create_host,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_create_host.parse(input);
+      const created = await createHost({
+        name: parsed.name,
+        description: parsed.description,
+        endpoint: parsed.endpoint,
+        organizationId: context.identity.organizationId,
+        createdByUserId: null,
+        executor: context.executor,
+      });
+      return {
+        host: {
+          id: created.host.id,
+          name: created.host.name,
+          endpoint: created.host.endpoint,
+          status: created.host.status,
+          dockerVersion: created.host.dockerVersion,
+        },
+      };
+    },
+  }),
+
+  dockpilot_update_host: createTool({
+    name: 'dockpilot_update_host',
+    title: 'Update Docker host',
+    description: 'Updates the name or description of a registered Docker host.',
+    mutates: true,
+    resourceType: 'host',
+    outputSchema: mcpToolOutputSchemas.dockpilot_update_host,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_update_host.parse(input);
+      const host = await updateHost({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        name: parsed.name,
+        description: parsed.description ?? undefined,
+        executor: context.executor,
+      });
+      return {
+        host: {
+          id: host.id,
+          name: host.name,
+          description: host.description,
+          endpoint: host.endpoint,
+          status: host.status,
+          dockerVersion: host.dockerVersion,
+        },
+      };
+    },
+  }),
+
+  dockpilot_set_container_state: createTool({
+    name: 'dockpilot_set_container_state',
+    title: 'Start, stop or restart a container',
+    description:
+      'Starts, stops or restarts a container on its registered Docker host. The action is executed against the host and audited.',
+    mutates: true,
+    resourceType: 'container',
+    outputSchema: mcpToolOutputSchemas.dockpilot_set_container_state,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_set_container_state.parse(input);
+      const args = {
+        organizationId: context.identity.organizationId,
+        containerId: parsed.containerId,
+        executor: context.executor,
+      };
+      const container =
+        parsed.action === 'start'
+          ? await startContainer(args)
+          : parsed.action === 'stop'
+            ? await stopContainer(args)
+            : await restartContainer(args);
+      return { container: toContainerActionResult(container) };
+    },
+  }),
+
+  dockpilot_request_host_removal: createTool({
+    name: 'dockpilot_request_host_removal',
+    title: 'Request host removal',
+    description:
+      'Creates a pending human approval request to remove a registered Docker host. The host is not removed until an administrator approves the request.',
+    mutates: true,
+    resourceType: 'ai_approval',
+    outputSchema: mcpToolOutputSchemas.dockpilot_request_host_removal,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_request_host_removal.parse(input);
+      const exists = await hostExists({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        executor: context.executor,
+      });
+      if (!exists) throw notFoundError('The host does not exist.');
+      const approval = await createApproval({
+        organizationId: context.identity.organizationId,
+        requestedByCredentialId: context.identity.credentialId,
+        toolName: 'dockpilot_request_host_removal',
+        actionType: 'host.remove',
+        permissionLevel: 'destructive',
+        targetType: 'host',
+        targetId: parsed.hostId,
+        args: { hostId: parsed.hostId },
+        justification: parsed.justification,
+        executor: context.executor,
+      });
+      return {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: 'pending',
+        targetType: 'host',
+        targetId: approval.targetId,
+        expiresAt: approval.expiresAt,
+      };
+    },
+  }),
+
+  dockpilot_request_container_removal: createTool({
+    name: 'dockpilot_request_container_removal',
+    title: 'Request container removal',
+    description:
+      'Creates a pending human approval request to remove a container. The container is not removed until an administrator approves the request.',
+    mutates: true,
+    resourceType: 'ai_approval',
+    outputSchema: mcpToolOutputSchemas.dockpilot_request_container_removal,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_request_container_removal.parse(input);
+      const container = await getContainer({
+        organizationId: context.identity.organizationId,
+        containerId: parsed.containerId,
+        executor: context.executor,
+      });
+      const approval = await createApproval({
+        organizationId: context.identity.organizationId,
+        requestedByCredentialId: context.identity.credentialId,
+        toolName: 'dockpilot_request_container_removal',
+        actionType: 'container.remove',
+        permissionLevel: 'destructive',
+        targetType: 'container',
+        targetId: container.containerId,
+        args: { containerId: container.containerId },
+        justification: parsed.justification,
+        executor: context.executor,
+      });
+      return {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: 'pending',
+        targetType: 'container',
+        targetId: approval.targetId,
+        expiresAt: approval.expiresAt,
+      };
+    },
+  }),
 } satisfies Record<McpToolName, McpToolDefinition>;
+
+function toHostSummary(host: {
+  id: string;
+  name: string;
+  description: string | null;
+  endpoint: string;
+  status: string;
+  dockerVersion: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  lastSeenAt: string | null;
+  createdAt: string;
+}): Record<string, unknown> {
+  return {
+    id: host.id,
+    name: host.name,
+    description: host.description,
+    endpoint: host.endpoint,
+    status: host.status,
+    dockerVersion: host.dockerVersion,
+    lastError: host.lastError,
+    lastErrorAt: host.lastErrorAt,
+    lastSeenAt: host.lastSeenAt,
+    createdAt: host.createdAt,
+  };
+}
+
+function toContainerSummary(container: {
+  id: string;
+  hostId: string;
+  containerId: string;
+  shortId: string | null;
+  name: string | null;
+  image: string;
+  state: string;
+  status: string;
+  syncedAt: string;
+}): Record<string, unknown> {
+  return {
+    id: container.id,
+    hostId: container.hostId,
+    containerId: container.containerId,
+    shortId: container.shortId,
+    name: container.name,
+    image: container.image,
+    state: container.state,
+    status: container.status,
+    syncedAt: container.syncedAt,
+  };
+}
+
+function toContainerActionResult(container: {
+  id: string;
+  hostId: string;
+  containerId: string;
+  name: string | null;
+  image: string;
+  state: string;
+  status: string;
+}): Record<string, unknown> {
+  return {
+    id: container.id,
+    hostId: container.hostId,
+    containerId: container.containerId,
+    name: container.name,
+    image: container.image,
+    state: container.state,
+    status: container.status,
+  };
+}
 
 function toAuditEventSummary(event: {
   id: string;

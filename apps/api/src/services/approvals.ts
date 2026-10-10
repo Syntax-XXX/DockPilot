@@ -7,6 +7,8 @@ import { keysetAfter } from '../lib/keyset.js';
 import { decodeCursor, encodeCursor } from '../lib/pagination.js';
 import { revokeAiCredential } from './ai-credentials.js';
 import { revokeSession } from './sessions.js';
+import { removeHost } from './hosts.js';
+import { removeContainer } from './containers.js';
 import type { AiPermissionLevel, ApprovalStatus, ApprovalView } from '@dockpilot/shared';
 
 export const approvalLifetimeMs = 60 * 60 * 1000;
@@ -42,7 +44,7 @@ interface ApprovalRow {
   arguments: Record<string, unknown>;
   justification: string | null;
   status: ApprovalStatus;
-  requestedByCredentialId: string;
+  requestedByCredentialId: string | null;
   requestedByCredentialName: string | null;
   requestedByAgentIdentity: string | null;
   decidedByUserId: string | null;
@@ -84,7 +86,7 @@ async function loadApproval(
   const rows = await executor
     .select(approvalColumns)
     .from(aiApprovals)
-    .innerJoin(aiCredentials, eq(aiCredentials.id, aiApprovals.requestedByCredentialId))
+    .leftJoin(aiCredentials, eq(aiCredentials.id, aiApprovals.requestedByCredentialId))
     .where(and(eq(aiApprovals.id, approvalId), eq(aiApprovals.organizationId, organizationId)))
     .limit(1);
   const row = rows[0];
@@ -94,7 +96,7 @@ async function loadApproval(
 
 export interface CreateApprovalInput {
   organizationId: string;
-  requestedByCredentialId: string;
+  requestedByCredentialId: string | null;
   toolName: string;
   actionType: string;
   permissionLevel: AiPermissionLevel;
@@ -148,7 +150,7 @@ export async function listApprovals(
   const rows = await executor
     .select(approvalColumns)
     .from(aiApprovals)
-    .innerJoin(aiCredentials, eq(aiCredentials.id, aiApprovals.requestedByCredentialId))
+    .leftJoin(aiCredentials, eq(aiCredentials.id, aiApprovals.requestedByCredentialId))
     .where(
       and(
         eq(aiApprovals.organizationId, input.organizationId),
@@ -223,11 +225,9 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
         targetId: aiApprovals.targetId,
         toolName: aiApprovals.toolName,
         requestedByCredentialId: aiApprovals.requestedByCredentialId,
-        agentIdentity: aiCredentials.agentIdentity,
         expiresAt: aiApprovals.expiresAt,
       })
       .from(aiApprovals)
-      .innerJoin(aiCredentials, eq(aiCredentials.id, aiApprovals.requestedByCredentialId))
       .where(
         and(
           eq(aiApprovals.id, input.approvalId),
@@ -243,6 +243,16 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
       throw conflictError('This approval request has already been decided.');
     }
 
+    let agentIdentity: string | null = null;
+    if (approval.requestedByCredentialId !== null) {
+      const credentialRows = await transaction
+        .select({ agentIdentity: aiCredentials.agentIdentity })
+        .from(aiCredentials)
+        .where(eq(aiCredentials.id, approval.requestedByCredentialId))
+        .limit(1);
+      agentIdentity = credentialRows[0]?.agentIdentity ?? null;
+    }
+
     const now = new Date();
     if (approval.expiresAt.getTime() <= now.getTime()) {
       await transaction
@@ -253,7 +263,7 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
         organizationId: input.organizationId,
         actorUserId: input.decidedByUserId,
         aiCredentialId: approval.requestedByCredentialId,
-        agentIdentity: approval.agentIdentity,
+        agentIdentity,
         action: 'approval.expired',
         resourceType: 'ai_approval',
         resourceId: approval.id,
@@ -281,7 +291,7 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
         organizationId: input.organizationId,
         actorUserId: input.decidedByUserId,
         aiCredentialId: approval.requestedByCredentialId,
-        agentIdentity: approval.agentIdentity,
+        agentIdentity,
         action: 'approval.rejected',
         resourceType: 'ai_approval',
         resourceId: approval.id,
@@ -318,7 +328,7 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
         organizationId: input.organizationId,
         actorUserId: input.decidedByUserId,
         aiCredentialId: approval.requestedByCredentialId,
-        agentIdentity: approval.agentIdentity,
+        agentIdentity,
         action: 'approval.execution_failed',
         resourceType: 'ai_approval',
         resourceId: approval.id,
@@ -337,7 +347,7 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
       organizationId: input.organizationId,
       actorUserId: input.decidedByUserId,
       aiCredentialId: approval.requestedByCredentialId,
-      agentIdentity: approval.agentIdentity,
+      agentIdentity,
       action: execution.action,
       resourceType: execution.resourceType,
       resourceId: approval.targetId,
@@ -402,6 +412,30 @@ async function executeApprovedAction(
         action: 'ai_credential.revoked',
         resourceType: 'ai_credential',
         summary: { credentialId: result.id },
+      };
+    }
+    case 'host.remove': {
+      await removeHost({
+        organizationId: input.organizationId,
+        hostId: input.targetId,
+        executor: transaction,
+      });
+      return {
+        action: 'host.removed',
+        resourceType: 'host',
+        summary: { hostId: input.targetId },
+      };
+    }
+    case 'container.remove': {
+      await removeContainer({
+        organizationId: input.organizationId,
+        containerId: input.targetId,
+        executor: transaction,
+      });
+      return {
+        action: 'container.removed',
+        resourceType: 'container',
+        summary: { containerId: input.targetId },
       };
     }
     default:

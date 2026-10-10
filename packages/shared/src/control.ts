@@ -200,7 +200,7 @@ export const approvalViewSchema = z
     arguments: z.record(z.string(), z.unknown()),
     justification: z.string().nullable(),
     status: approvalStatusSchema,
-    requestedByCredentialId: idSchema,
+    requestedByCredentialId: idSchema.nullable(),
     requestedByCredentialName: z.string().nullable(),
     requestedByAgentIdentity: z.string().nullable(),
     decidedByUserId: idSchema.nullable(),
@@ -227,6 +227,12 @@ export const approvalDecisionInputSchema = z
   .strict();
 
 export const approvalDecisionResponseSchema = z
+  .object({
+    approval: approvalViewSchema,
+  })
+  .strict();
+
+export const approvalRequestResponseSchema = z
   .object({
     approval: approvalViewSchema,
   })
@@ -358,6 +364,12 @@ export const containerLogResponseSchema = z
   })
   .strict();
 
+export const containerViewResponseSchema = z
+  .object({
+    container: containerViewSchema,
+  })
+  .strict();
+
 export const containerActionResponseSchema = z
   .object({
     container: containerViewSchema,
@@ -369,5 +381,7 @@ export type HostStatus = z.infer<typeof hostStatusSchema>;
 export type CreateHostInput = z.infer<typeof createHostInputSchema>;
 export type CreateHostResponse = z.infer<typeof createHostResponseSchema>;
 export type UpdateHostInput = z.infer<typeof updateHostInputSchema>;
+export type HostListResponse = z.infer<typeof hostListResponseSchema>;
 export type ContainerView = z.infer<typeof containerViewSchema>;
 export type ContainerLogView = z.infer<typeof containerLogViewSchema>;
+export type ContainerListResponse = z.infer<typeof containerListResponseSchema>;

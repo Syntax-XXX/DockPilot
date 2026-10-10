@@ -1,7 +1,12 @@
 import { config } from 'dotenv';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import path from 'node:path';
 
 config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) });
+
+// Deterministic fixture socket so the Docker endpoint allowlist (read at module load) admits it.
+process.env.DOCKPILOT_DOCKER_SOCKETS = path.join(os.tmpdir(), 'dockpilot-test-docker.sock');
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET = 'vitest-integration-test-only-random-secret-not-for-production';

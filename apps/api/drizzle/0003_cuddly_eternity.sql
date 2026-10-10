@@ -1,0 +1,1 @@
+ALTER TABLE "ai_approvals" ALTER COLUMN "requested_by_credential_id" DROP NOT NULL;

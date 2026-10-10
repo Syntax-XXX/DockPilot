@@ -133,58 +133,50 @@ export async function containerLog(input: ContainerLogInput): Promise<ContainerL
   return toContainerLogView(log, false, tail);
 }
 
-export async function startContainer(input: {
-  organizationId: string;
-  containerId: string;
-  executor?: DbExecutor;
-}): Promise<void> {
-  const executor = input.executor ?? db;
+async function resolveHostEndpoint(
+  input: { organizationId: string; containerId: string; executor?: DbExecutor },
+  executor: DbExecutor,
+): Promise<{ container: ContainerView; endpoint: ReturnType<typeof parseDockerEndpoint> }> {
   const container = await getContainer({ ...input, executor });
-
   const host = await getHost({
     organizationId: input.organizationId,
     hostId: container.hostId,
     executor,
   });
-  const endpoint = parseDockerEndpoint(host.endpoint);
+  return { container, endpoint: parseDockerEndpoint(host.endpoint) };
+}
 
+export async function startContainer(input: {
+  organizationId: string;
+  containerId: string;
+  executor?: DbExecutor;
+}): Promise<ContainerView> {
+  const executor = input.executor ?? db;
+  const { container, endpoint } = await resolveHostEndpoint(input, executor);
   await dockerStartContainer(endpoint, container.containerId);
+  return await getContainer({ ...input, executor });
 }
 
 export async function stopContainer(input: {
   organizationId: string;
   containerId: string;
   executor?: DbExecutor;
-}): Promise<void> {
+}): Promise<ContainerView> {
   const executor = input.executor ?? db;
-  const container = await getContainer({ ...input, executor });
-
-  const host = await getHost({
-    organizationId: input.organizationId,
-    hostId: container.hostId,
-    executor,
-  });
-  const endpoint = parseDockerEndpoint(host.endpoint);
-
+  const { container, endpoint } = await resolveHostEndpoint(input, executor);
   await dockerStopContainer(endpoint, container.containerId);
+  return await getContainer({ ...input, executor });
 }
 
 export async function restartContainer(input: {
   organizationId: string;
   containerId: string;
   executor?: DbExecutor;
-}): Promise<void> {
+}): Promise<ContainerView> {
   const executor = input.executor ?? db;
-  const container = await getContainer({ ...input, executor });
-
-  const host = await getHost({
-    organizationId: input.organizationId,
-    hostId: container.hostId,
-    executor,
-  });
-  const endpoint = parseDockerEndpoint(host.endpoint);
-
+  const { container, endpoint } = await resolveHostEndpoint(input, executor);
   await dockerRestartContainer(endpoint, container.containerId);
+  return await getContainer({ ...input, executor });
 }
 
 export async function removeContainer(input: {

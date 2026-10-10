@@ -82,11 +82,19 @@ The product is alpha. Scope below reflects README, architecture, current routes/
 
 ### DP-DOCKER-003 — Expose only validated Docker capabilities through authorized routes
 
-- Category: Docker / API / authorization · Priority: P1 · Status: `TODO`
+- Category: Docker / API / authorization · Priority: P1 · Status: `DONE`
 - Description: Docker client utility code exists, but architecture declares host agent/operations planned. Confirm whether any route safely invokes it and implement only backed, permission-checked use cases.
 - Acceptance: No public arbitrary socket path or unreviewed destructive action; calls are organization-scoped, audited, bounded and tested; unsupported features labeled unavailable.
 - Dependencies: route inventory, threat model · Files: `apps/api/src/lib/docker.ts`, `apps/api/src/routes/*`, `apps/api/src/services/*`.
-- Verification: adversarial endpoint tests and local Docker test fixture.
+- Verification/result: Docker vertical slice wired end-to-end in `apps/api/src/routes/docker.ts` (hosts/containers REST under `/api/v1/admin`) and in the MCP catalog/registry, guarded by `apps/api/src/lib/docker-authz.ts` (`hasDockerCapability`). Endpoint allowlist enforced by `parseDockerEndpoint` and covered by `test/unit/docker-endpoint.test.ts`; read/operational/administrative authorization and removal-via-approval covered by `test/integration/docker.test.ts` against the unix-socket fixture in `test/helpers/docker-fixture.ts`. Unit 68 passed (4 files), integration 72 passed (5 files), typecheck/lint/format/build passed.
+
+### DP-DOCKER-005 — Docker operator dashboard and MCP control surface
+
+- Category: Docker / UI / MCP · Priority: P1 · Status: `DONE`
+- Description: Turn the half-wired Docker feature into a usable vertical slice: register a host, sync/browse containers, view logs, and start/stop/restart from the dashboard, plus the same authorized operations for AI agents over MCP.
+- Acceptance: UI exposes hosts/containers with role-gated actions; MCP exposes named, narrowly-scoped Docker tools (no generic exec/shell); every operation is organization-scoped, permission-checked and audited.
+- Dependencies: DP-DOCKER-003 · Files: `apps/web/src/pages/DockerControl.tsx`, `apps/web/src/pages/App.tsx`, `apps/web/src/lib/api.ts`, `packages/shared/src/{control,mcp}.ts`, `apps/api/src/mcp/registry.ts`, `demo/mock-api.js`.
+- Verification/result: `DockerControl` console sections rendered from typed API client functions; Docker MCP tools catalogued and registered with no generic exec/shell tool; `demo/mock-api.js` gained browser-local host/container endpoints. Build, typecheck, lint, format, unit and integration all passed.
 
 ### DP-DOCKER-004 — Add reproducible API/web Docker build and run topology
 

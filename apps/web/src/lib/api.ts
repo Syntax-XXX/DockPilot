@@ -2,22 +2,35 @@ import {
   aiCredentialListResponseSchema,
   approvalDecisionResponseSchema,
   approvalListResponseSchema,
+  approvalRequestResponseSchema,
   auditEventListResponseSchema,
   auditEventSchema,
   bootstrapStatusSchema,
+  containerActionResponseSchema,
+  containerListResponseSchema,
+  containerLogResponseSchema,
+  containerViewResponseSchema,
   createAiCredentialResponseSchema,
+  createHostResponseSchema,
+  hostListResponseSchema,
+  hostViewSchema,
   revokeAiCredentialResponseSchema,
   sessionResponseSchema,
   systemStatusSchema,
+  updateHostResponseSchema,
   type AiCredentialView,
   type ApprovalView,
   type AuditEvent,
   type AuditEventQuery,
+  type ContainerView,
   type CreateAiCredentialInput,
+  type CreateHostInput,
+  type HostView,
   type LoginInput,
   type SafeUser,
   type SetupAccountInput,
   type SystemStatus,
+  type UpdateHostInput,
 } from '@dockpilot/shared';
 import { z } from 'zod';
 
@@ -248,5 +261,147 @@ export function decideApproval(
     `/approvals/${encodeURIComponent(id)}/decision`,
     { method: 'POST', body: JSON.stringify(payload) },
     approvalDecisionResponseSchema,
+  );
+}
+
+export interface HostPage {
+  hosts: HostView[];
+  nextCursor: string | null;
+}
+
+export interface ContainerPage {
+  containers: ContainerView[];
+  nextCursor: string | null;
+}
+
+export function fetchHosts(cursor?: string): Promise<HostPage> {
+  const query = cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`;
+  return requestAdmin(`/hosts${query}`, {}, hostListResponseSchema);
+}
+
+export function createHost(input: CreateHostInput): Promise<{ host: HostView; token: string }> {
+  return requestAdmin(
+    '/hosts',
+    { method: 'POST', body: JSON.stringify(input) },
+    createHostResponseSchema,
+  );
+}
+
+export function fetchHost(id: string): Promise<HostView> {
+  return requestAdmin(`/hosts/${encodeURIComponent(id)}`, {}, hostViewSchema);
+}
+
+export function updateHost(id: string, input: UpdateHostInput): Promise<{ host: HostView }> {
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+    updateHostResponseSchema,
+  );
+}
+
+export function refreshHost(id: string): Promise<HostView> {
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(id)}/refresh`,
+    { method: 'POST', body: '{}' },
+    hostViewSchema,
+  );
+}
+
+export function disableHost(id: string): Promise<HostView> {
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(id)}/disable`,
+    { method: 'POST', body: '{}' },
+    hostViewSchema,
+  );
+}
+
+export function enableHost(id: string): Promise<HostView> {
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(id)}/enable`,
+    { method: 'POST', body: '{}' },
+    hostViewSchema,
+  );
+}
+
+export function syncHost(id: string): Promise<{ synced: number }> {
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(id)}/sync`,
+    { method: 'POST', body: '{}' },
+    z.strictObject({ synced: z.number().int().nonnegative() }),
+  );
+}
+
+export function requestHostRemoval(
+  id: string,
+  justification: string,
+): Promise<{ approval: ApprovalView }> {
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(id)}`,
+    { method: 'DELETE', body: JSON.stringify({ justification }) },
+    approvalRequestResponseSchema,
+  );
+}
+
+export function fetchContainers(hostId: string, cursor?: string): Promise<ContainerPage> {
+  const params = new URLSearchParams();
+  if (cursor !== undefined) params.set('cursor', cursor);
+  const query = params.toString();
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(hostId)}/containers${query.length > 0 ? `?${query}` : ''}`,
+    {},
+    containerListResponseSchema,
+  );
+}
+
+export function fetchContainer(containerId: string): Promise<ContainerView> {
+  return requestAdmin(
+    `/containers/${encodeURIComponent(containerId)}`,
+    {},
+    containerViewResponseSchema,
+  ).then((parsed) => parsed.container);
+}
+
+export function fetchContainerLogs(
+  containerId: string,
+  tail = 200,
+): Promise<{ log: string; tty: boolean; tail: number }> {
+  return requestAdmin(
+    `/containers/${encodeURIComponent(containerId)}/logs?tail=${String(tail)}`,
+    {},
+    containerLogResponseSchema,
+  ).then((parsed) => parsed.log);
+}
+
+export function startContainer(containerId: string): Promise<ContainerView> {
+  return containerAction(containerId, 'start');
+}
+
+export function stopContainer(containerId: string): Promise<ContainerView> {
+  return containerAction(containerId, 'stop');
+}
+
+export function restartContainer(containerId: string): Promise<ContainerView> {
+  return containerAction(containerId, 'restart');
+}
+
+function containerAction(
+  containerId: string,
+  action: 'start' | 'stop' | 'restart',
+): Promise<ContainerView> {
+  return requestAdmin(
+    `/containers/${encodeURIComponent(containerId)}/${action}`,
+    { method: 'POST', body: '{}' },
+    containerActionResponseSchema,
+  ).then((parsed) => parsed.container);
+}
+
+export function requestContainerRemoval(
+  containerId: string,
+  justification: string,
+): Promise<{ approval: ApprovalView }> {
+  return requestAdmin(
+    `/containers/${encodeURIComponent(containerId)}`,
+    { method: 'DELETE', body: JSON.stringify({ justification }) },
+    approvalRequestResponseSchema,
   );
 }

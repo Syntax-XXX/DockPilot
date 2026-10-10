@@ -17,6 +17,8 @@
       credentials: [],
       events: [],
       approvals: [],
+      hosts: [],
+      containers: [],
     };
   };
   let state = readState();
@@ -137,6 +139,52 @@
     save();
   }
 
+  function dockerId(seed) {
+    return Array.from(
+      { length: 64 },
+      (_, index) => '0123456789abcdef'[(seed * 7 + index * 13) % 16],
+    ).join('');
+  }
+
+  function seedDocker() {
+    if (state.hosts.length) return;
+    const nodes = [
+      { name: 'cedar-nas', endpoint: 'unix:///var/run/docker.sock', version: '27.1.1' },
+      { name: 'maple-mini', endpoint: 'unix:///run/docker.sock', version: '26.1.4' },
+    ];
+    const images = ['nginx:alpine', 'postgres:17', 'ghcr.io/dockpilot/agent:1.2.0'];
+    nodes.forEach((node, nodeIndex) => {
+      const hostId = makeId();
+      state.hosts.push({
+        id: hostId,
+        name: node.name,
+        description: 'Simulated homelab node (demo data only).',
+        endpoint: node.endpoint,
+        status: 'healthy',
+        dockerVersion: node.version,
+        lastError: null,
+        lastErrorAt: null,
+        lastSeenAt: new Date(Date.now() - nodeIndex * 45_000).toISOString(),
+        createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+      });
+      for (let index = 0; index < 3; index += 1) {
+        const containerId = dockerId(nodeIndex * 10 + index + 1);
+        state.containers.push({
+          id: makeId(),
+          hostId,
+          containerId,
+          shortId: containerId.slice(0, 12),
+          name: `${node.name}-svc-${String(index + 1)}`,
+          image: images[(nodeIndex + index) % images.length],
+          state: index === 2 ? 'exited' : 'running',
+          status: index === 2 ? 'Exited (0) 2 hours ago' : 'Up 3 hours',
+          syncedAt: new Date(Date.now() - nodeIndex * 60_000).toISOString(),
+        });
+      }
+    });
+    save();
+  }
+
   function systemStatus() {
     return {
       setupRequired: !state.user,
@@ -222,6 +270,7 @@
     if (!state.sessionActive || !state.user)
       return error('UNAUTHENTICATED', 'Sign in to continue.', 401);
     seed();
+    seedDocker();
     if (path === '/api/v1/admin/system-status' && method === 'GET') return json(systemStatus());
     if (path === '/api/v1/admin/ai-credentials' && method === 'GET') {
       const start = Number(url.searchParams.get('cursor') || 0);
@@ -352,6 +401,204 @@
       approval.executionAuditEventId = event.id;
       save();
       return json({ approval });
+    }
+    if (path === '/api/v1/admin/hosts' && method === 'GET') {
+      const start = Number(url.searchParams.get('cursor') || 0);
+      const page = state.hosts.slice(start, start + 25);
+      return json({
+        hosts: page,
+        nextCursor: start + 25 < state.hosts.length ? String(start + 25) : null,
+      });
+    }
+    if (path === '/api/v1/admin/hosts' && method === 'POST') {
+      const body = await request.json();
+      if (!body.name?.trim() || !/^unix:\/\//.test(body.endpoint || '')) {
+        return error('VALIDATION_ERROR', 'Provide a host name and a valid Docker endpoint.');
+      }
+      const host = {
+        id: makeId(),
+        name: body.name.trim(),
+        description: body.description || null,
+        endpoint: body.endpoint.trim(),
+        status: 'healthy',
+        dockerVersion: '27.1.1',
+        lastError: null,
+        lastErrorAt: null,
+        lastSeenAt: now(),
+        createdAt: now(),
+      };
+      state.hosts.unshift(host);
+      addEvent({
+        action: 'host.created',
+        toolName: null,
+        agentIdentity: null,
+        actorUserId: state.user.id,
+        resourceType: 'host',
+        resourceId: host.id,
+        targetType: 'host',
+        targetId: host.id,
+        inputSummary: { name: host.name, endpoint: host.endpoint },
+        resultSummary: { created: true },
+      });
+      save();
+      return json({ host, token: `dph_demo_${makeId().slice(0, 16)}` }, 201);
+    }
+    const hostMatch = path.match(/^\/api\/v1\/admin\/hosts\/([^/]+)$/);
+    if (hostMatch && method === 'GET') {
+      const host = state.hosts.find((item) => item.id === hostMatch[1]);
+      return host ? json(host) : error('NOT_FOUND', 'Host not found.', 404);
+    }
+    if (hostMatch && method === 'DELETE') {
+      const host = state.hosts.find((item) => item.id === hostMatch[1]);
+      if (!host) return error('NOT_FOUND', 'Host not found.', 404);
+      const body = await request.json().catch(() => ({}));
+      const approval = {
+        id: makeId(),
+        toolName: 'admin.host_removal',
+        actionType: 'host.remove',
+        permissionLevel: 'destructive',
+        targetType: 'host',
+        targetId: host.id,
+        arguments: { hostId: host.id },
+        justification: body.justification || 'Administrator removal request (demo).',
+        status: 'pending',
+        requestedByCredentialId: null,
+        requestedByCredentialName: null,
+        requestedByAgentIdentity: null,
+        decidedByUserId: null,
+        decidedAt: null,
+        decisionNote: null,
+        executionAuditEventId: null,
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        createdAt: now(),
+      };
+      state.approvals.unshift(approval);
+      addEvent({
+        action: 'host.removal_requested',
+        toolName: null,
+        agentIdentity: null,
+        actorUserId: state.user.id,
+        resourceType: 'host',
+        resourceId: host.id,
+        targetType: 'host',
+        targetId: host.id,
+        approvalId: approval.id,
+        resultSummary: { approvalRequired: true },
+      });
+      save();
+      return json({ approval }, 202);
+    }
+    const syncMatch = path.match(/^\/api\/v1\/admin\/hosts\/([^/]+)\/sync$/);
+    if (syncMatch && method === 'POST') {
+      const host = state.hosts.find((item) => item.id === syncMatch[1]);
+      if (!host) return error('NOT_FOUND', 'Host not found.', 404);
+      host.status = 'healthy';
+      host.lastSeenAt = now();
+      addEvent({
+        action: 'host.synced',
+        toolName: null,
+        agentIdentity: null,
+        actorUserId: state.user.id,
+        resourceType: 'host',
+        resourceId: host.id,
+        targetType: 'host',
+        targetId: host.id,
+        resultSummary: {
+          synced: state.containers.filter((item) => item.hostId === host.id).length,
+        },
+      });
+      save();
+      return json({ synced: state.containers.filter((item) => item.hostId === host.id).length });
+    }
+    const hostContainersMatch = path.match(/^\/api\/v1\/admin\/hosts\/([^/]+)\/containers$/);
+    if (hostContainersMatch && method === 'GET') {
+      const containers = state.containers.filter((item) => item.hostId === hostContainersMatch[1]);
+      return json({ containers, nextCursor: null });
+    }
+    const containerMatch = path.match(/^\/api\/v1\/admin\/containers\/([a-f0-9]{64})$/);
+    if (containerMatch && method === 'DELETE') {
+      const container = state.containers.find((item) => item.containerId === containerMatch[1]);
+      if (!container) return error('NOT_FOUND', 'Container not found.', 404);
+      const body = await request.json().catch(() => ({}));
+      const approval = {
+        id: makeId(),
+        toolName: 'admin.container_removal',
+        actionType: 'container.remove',
+        permissionLevel: 'destructive',
+        targetType: 'container',
+        targetId: container.containerId,
+        arguments: { containerId: container.containerId },
+        justification: body.justification || 'Administrator removal request (demo).',
+        status: 'pending',
+        requestedByCredentialId: null,
+        requestedByCredentialName: null,
+        requestedByAgentIdentity: null,
+        decidedByUserId: null,
+        decidedAt: null,
+        decisionNote: null,
+        executionAuditEventId: null,
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        createdAt: now(),
+      };
+      state.approvals.unshift(approval);
+      addEvent({
+        action: 'container.removal_requested',
+        toolName: null,
+        agentIdentity: null,
+        actorUserId: state.user.id,
+        resourceType: 'container',
+        resourceId: container.id,
+        targetType: 'container',
+        targetId: container.containerId,
+        approvalId: approval.id,
+        resultSummary: { approvalRequired: true },
+      });
+      save();
+      return json({ approval }, 202);
+    }
+    const containerLogsMatch = path.match(/^\/api\/v1\/admin\/containers\/([a-f0-9]{64})\/logs$/);
+    if (containerLogsMatch && method === 'GET') {
+      const container = state.containers.find((item) => item.containerId === containerLogsMatch[1]);
+      if (!container) return error('NOT_FOUND', 'Container not found.', 404);
+      const tail = Math.min(Number(url.searchParams.get('tail') || 200), 1000);
+      const log = [
+        `${now()}  INFO  Starting ${container.name}`,
+        `${now()}  INFO  Health check passed`,
+        `${now()}  INFO  Serving on the simulated network`,
+        '',
+        'Demo logs are generated locally. No real container output is available.',
+      ].join('\n');
+      return json({ log: { log, tty: false, tail } });
+    }
+    const containerActionMatch = path.match(
+      /^\/api\/v1\/admin\/containers\/([a-f0-9]{64})\/(start|stop|restart)$/,
+    );
+    if (containerActionMatch && method === 'POST') {
+      const container = state.containers.find(
+        (item) => item.containerId === containerActionMatch[1],
+      );
+      if (!container) return error('NOT_FOUND', 'Container not found.', 404);
+      const action = containerActionMatch[2];
+      container.state = action === 'stop' ? 'exited' : 'running';
+      container.status = action === 'stop' ? 'Exited (0) just now' : 'Up just now';
+      const actionNames = {
+        start: 'container.started',
+        stop: 'container.stopped',
+        restart: 'container.restarted',
+      };
+      addEvent({
+        action: actionNames[action],
+        toolName: null,
+        agentIdentity: null,
+        actorUserId: state.user.id,
+        resourceType: 'container',
+        resourceId: container.id,
+        targetType: 'container',
+        targetId: container.containerId,
+        resultSummary: { state: container.state },
+      });
+      save();
+      return json({ container });
     }
     return error('NOT_FOUND', 'No mock demo endpoint matches this request.', 404);
   }

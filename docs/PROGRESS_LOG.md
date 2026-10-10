@@ -1,5 +1,33 @@
 # DockPilot progress log
 
+## 2026-10-10 — Docker vertical slice: REST routes, MCP tools, dashboard, demo
+
+### Changes in this checkout
+
+- `apps/api/src/routes/docker.ts` (new): organization-scoped REST endpoints under `/api/v1/admin` for host registration/refresh/enable/disable/sync, container list/detail/logs, and start/stop/restart; host and container removal create a pending approval instead of deleting directly. Mutations run in a transaction and write audit events (`host.created`, `host.synced`, `container.started`/`stopped`/`restarted`, `*.removal_requested`).
+- `apps/api/src/lib/docker-authz.ts` (new): `hasDockerCapability` maps user roles to read/operational/administrative/remove capabilities shared by REST and MCP.
+- `apps/api/src/lib/docker-errors.ts` (new): maps Docker/allowlist errors to HTTP status codes (400, not 500).
+- `packages/shared/src/mcp.ts`, `apps/api/src/mcp/registry.ts`: new named Docker tools (`dockpilot_list_hosts`, `dockpilot_get_host`, `dockpilot_list_containers`, `dockpilot_get_container_logs`, `dockpilot_sync_host_containers`, `dockpilot_create_host`, `dockpilot_update_host`, `dockpilot_set_container_state`, `dockpilot_request_host_removal`, `dockpilot_request_container_removal`); no generic exec/shell tool.
+- `packages/shared/src/control.ts`: new response schemas (`approvalDecisionResponseSchema`, `approvalRequestResponseSchema`, `containerLogResponseSchema`, `containerViewResponseSchema`).
+- `apps/api/src/services/{hosts,approvals,containers}.ts`, `apps/api/src/db/schema.ts` + migration `0003_cuddly_eternity.sql`: nullable `requested_by_credential_id` so admin-initiated approvals are supported; approval locking narrowed to the approvals row.
+- `apps/web/src/pages/DockerControl.tsx` (new) + `apps/web/src/pages/App.tsx`, `apps/web/src/lib/api.ts`, `apps/web/src/styles/global.css`: Hosts and Containers console sections with typed client calls, role-gated controls, log viewer, and an approval-requested notice.
+- `demo/mock-api.js`: browser-local mock endpoints for hosts/containers/logs/actions and approvals; never contacts a real Docker daemon.
+- `.env.example`: documents `DOCKPILOT_DOCKER_SOCKETS` allowlist.
+
+### Verified
+
+- `npm run typecheck`: passed (shared, api, web).
+- `npm test`: 68 unit tests (4 files) + 72 integration tests (5 files) passed.
+- `npm run lint`: passed (`--max-warnings=0`).
+- `npm run format:check`: passed.
+- `npm run build`: passed (shared/api/web).
+- Docker interaction is exercised against the controlled unix-socket fixture in `apps/api/test/helpers/docker-fixture.ts`; no live Docker daemon is required in CI.
+
+### Limitations / blockers
+
+- Authenticated browser validation of the new dashboard sections still requires a logged-in operator; not performed in this environment.
+- Live-Docker validation against a real daemon was not performed (fixture-only, per plan).
+
 ## 2026-10-09 — UI status, Docker log/socket guardrails, verification
 
 ### Follow-up implementation (same session)

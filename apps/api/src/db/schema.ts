@@ -126,9 +126,9 @@ export const aiApprovals = pgTable(
     organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'restrict' }),
-    requestedByCredentialId: uuid('requested_by_credential_id')
-      .notNull()
-      .references(() => aiCredentials.id, { onDelete: 'restrict' }),
+    requestedByCredentialId: uuid('requested_by_credential_id').references(() => aiCredentials.id, {
+      onDelete: 'restrict',
+    }),
     toolName: varchar('tool_name', { length: 80 }).notNull(),
     actionType: varchar('action_type', { length: 60 }).notNull(),
     permissionLevel: aiPermissionLevel('permission_level').notNull(),
