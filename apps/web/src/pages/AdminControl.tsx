@@ -4,6 +4,7 @@ import {
   BadgeCheck,
   Bot,
   Check,
+  CircleSlash,
   ClipboardCopy,
   Fingerprint,
   KeyRound,
@@ -28,12 +29,15 @@ import {
   ApiError,
   createAiCredential,
   decideApproval,
+  disableAiCredential,
+  enableAiCredential,
   fetchAiCredentials,
   fetchApprovals,
   fetchAuditEvent,
   fetchAuditEvents,
   fetchSystemStatus,
   revokeAiCredential,
+  rotateAiCredential,
 } from '../lib/api.js';
 
 export type AdminSection = 'ai-credentials' | 'audit-log' | 'approvals';
@@ -213,6 +217,7 @@ function AiCredentialsPanel() {
   const [creating, setCreating] = useState(false);
   const [pendingRevoke, setPendingRevoke] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pendingRotate, setPendingRotate] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [agentIdentity, setAgentIdentity] = useState('');
@@ -289,6 +294,38 @@ function AiCredentialsPanel() {
       await load();
     } catch (revokeError) {
       setError(ErrorMessage(revokeError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function toggleDisabled(credential: AiCredentialView): Promise<void> {
+    setBusyId(credential.id);
+    setError(null);
+    try {
+      if (credential.disabledAt === null) {
+        await disableAiCredential(credential.id);
+      } else {
+        await enableAiCredential(credential.id);
+      }
+      await load();
+    } catch (toggleError) {
+      setError(ErrorMessage(toggleError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function rotate(id: string): Promise<void> {
+    setBusyId(id);
+    setError(null);
+    try {
+      const rotated = await rotateAiCredential(id);
+      setPendingRotate(null);
+      setIssuedToken(rotated.token);
+      await load();
+    } catch (rotateError) {
+      setError(ErrorMessage(rotateError));
     } finally {
       setBusyId(null);
     }
@@ -528,16 +565,71 @@ function AiCredentialsPanel() {
                         Cancel
                       </button>
                     </span>
+                  ) : pendingRotate === credential.id ? (
+                    <span className="admin-confirm">
+                      <button
+                        type="button"
+                        className="button button--primary button--compact"
+                        disabled={busyId === credential.id}
+                        onClick={() => {
+                          void rotate(credential.id);
+                        }}
+                      >
+                        {busyId === credential.id ? (
+                          <Loader2 size={13} className="admin-spin" />
+                        ) : (
+                          <RefreshCw size={13} />
+                        )}
+                        Confirm rotate
+                      </button>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => {
+                          setPendingRotate(null);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </span>
                   ) : (
-                    <button
-                      type="button"
-                      className="button button--outline button--compact"
-                      onClick={() => {
-                        setPendingRevoke(credential.id);
-                      }}
-                    >
-                      <ShieldAlert size={13} /> Revoke
-                    </button>
+                    <span className="admin-row-actions">
+                      <button
+                        type="button"
+                        className="button button--outline button--compact"
+                        disabled={busyId === credential.id}
+                        onClick={() => {
+                          void toggleDisabled(credential);
+                        }}
+                      >
+                        {busyId === credential.id ? (
+                          <Loader2 size={13} className="admin-spin" />
+                        ) : credential.disabledAt === null ? (
+                          <CircleSlash size={13} />
+                        ) : (
+                          <BadgeCheck size={13} />
+                        )}
+                        {credential.disabledAt === null ? 'Disable' : 'Enable'}
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--outline button--compact"
+                        onClick={() => {
+                          setPendingRotate(credential.id);
+                        }}
+                      >
+                        <RefreshCw size={13} /> Rotate
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--outline button--compact"
+                        onClick={() => {
+                          setPendingRevoke(credential.id);
+                        }}
+                      >
+                        <ShieldAlert size={13} /> Revoke
+                      </button>
+                    </span>
                   )}
                 </td>
               </tr>

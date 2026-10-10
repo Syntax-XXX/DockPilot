@@ -2,7 +2,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   aiCredentialListResponseSchema,
-  aiCredentialViewSchema,
   approvalDecisionInputSchema,
   approvalDecisionResponseSchema,
   approvalListResponseSchema,
@@ -11,8 +10,11 @@ import {
   auditEventSchema,
   createAiCredentialInputSchema,
   createAiCredentialResponseSchema,
+  disableAiCredentialResponseSchema,
+  enableAiCredentialResponseSchema,
   idSchema,
   revokeAiCredentialResponseSchema,
+  rotateAiCredentialResponseSchema,
   systemStatusSchema,
   type SafeUser,
 } from '@dockpilot/shared';
@@ -155,7 +157,7 @@ export function administratorRoutes(app: FastifyInstance): void {
       return disabled;
     });
 
-    return reply.send(aiCredentialViewSchema.parse(credential));
+    return reply.send(disableAiCredentialResponseSchema.parse({ credential }));
   });
 
   app.post('/ai-credentials/:id/enable', async (request, reply) => {
@@ -183,7 +185,7 @@ export function administratorRoutes(app: FastifyInstance): void {
       return enabled;
     });
 
-    return reply.send(aiCredentialViewSchema.parse(credential));
+    return reply.send(enableAiCredentialResponseSchema.parse({ credential }));
   });
 
   app.post('/ai-credentials/:id/rotate', async (request, reply) => {
@@ -215,7 +217,7 @@ export function administratorRoutes(app: FastifyInstance): void {
       return result;
     });
 
-    return reply.code(201).send(createAiCredentialResponseSchema.parse(created));
+    return reply.code(201).send(rotateAiCredentialResponseSchema.parse(created));
   });
 
   app.get('/audit-events', async (request, reply) => {

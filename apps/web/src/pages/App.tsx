@@ -36,11 +36,12 @@ import {
   logOut,
   fetchSystemStatus,
   fetchDockerSummary,
+  fetchHosts,
   ApiError,
 } from '../lib/api.js';
 import { AdminControl, isAdministrator, type AdminSection } from './AdminControl.js';
 import { DockerControl, type DockerSection } from './DockerControl.js';
-import type { DockerSummary, SafeUser } from '@dockpilot/shared';
+import type { DockerSummary, HostView, SafeUser } from '@dockpilot/shared';
 
 type LoadState = 'loading' | 'ready' | 'error';
 type ConsoleSection = 'overview' | DockerSection | AdminSection;
@@ -458,8 +459,8 @@ function AuthenticationScreen({
           </form>
           {mode === 'login' && (
             <p className="forgot-copy">
-              Forgot your password? Password recovery is not available in this milestone. Contact
-              your instance administrator.
+              Forgot your password? Password recovery is not implemented yet. Contact your instance
+              administrator.
             </p>
           )}
           <div className="auth-divider">
@@ -587,10 +588,16 @@ function OperatorConsole({
   const [statusRefreshing, setStatusRefreshing] = useState(false);
   const [lastStatusUpdate, setLastStatusUpdate] = useState<Date | null>(null);
   const [dockerSummary, setDockerSummary] = useState<DockerSummary | null>(null);
+  const [syncableHosts, setSyncableHosts] = useState<HostView[]>([]);
+  const [hostSelectorOpen, setHostSelectorOpen] = useState(false);
   const statusRequestInFlight = useRef(false);
   const operatorMounted = useRef(false);
   const administrator = isAdministrator(user);
   const showAdministrativeStatus = (content: React.ReactNode) => (administrator ? content : null);
+  const activeHostName =
+    selectedHostId === null
+      ? 'All hosts'
+      : (syncableHosts.find((host) => host.id === selectedHostId)?.name ?? 'Unknown host');
   const refreshDockerSummary = useCallback(async () => {
     try {
       const summary = await fetchDockerSummary();
@@ -599,6 +606,16 @@ function OperatorConsole({
     } catch {
       if (!operatorMounted.current) return;
       setDockerSummary(null);
+    }
+  }, []);
+  const refreshHosts = useCallback(async () => {
+    try {
+      const page = await fetchHosts();
+      if (!operatorMounted.current) return;
+      setSyncableHosts(page.hosts);
+    } catch {
+      if (!operatorMounted.current) return;
+      setSyncableHosts([]);
     }
   }, []);
   const refreshOperationalStatus = useCallback(async () => {
@@ -631,19 +648,23 @@ function OperatorConsole({
 
   useEffect(() => {
     operatorMounted.current = true;
-    if (!administrator) return;
-
-    void refreshOperationalStatus();
-    void refreshDockerSummary();
-    const interval = window.setInterval(() => {
+    void refreshHosts();
+    if (administrator) {
       void refreshOperationalStatus();
       void refreshDockerSummary();
+    }
+    const interval = window.setInterval(() => {
+      void refreshHosts();
+      if (administrator) {
+        void refreshOperationalStatus();
+        void refreshDockerSummary();
+      }
     }, 30_000);
     return () => {
       operatorMounted.current = false;
       window.clearInterval(interval);
     };
-  }, [administrator, refreshOperationalStatus, refreshDockerSummary]);
+  }, [administrator, refreshOperationalStatus, refreshDockerSummary, refreshHosts]);
   async function doLogout() {
     setLogoutBusy(true);
     await onLogout();
@@ -655,22 +676,77 @@ function OperatorConsole({
       <aside className="sidebar">
         <header className="sidebar-brand">
           <ProductMark small />
-          <button
-            className="host-selector"
-            type="button"
-            aria-label="Host selector: all hosts"
-            disabled
-            title="Host registration is not available in this milestone"
-          >
-            <span className="host-selector-icon">
-              <Server size={15} />
-            </span>
-            <span className="host-selector-copy">
-              <span>INFRASTRUCTURE</span>
-              <strong>All hosts</strong>
-            </span>
-            <ChevronDown size={14} className="host-chevron" />
-          </button>
+          <div className="host-selector-wrap">
+            <button
+              className="host-selector"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={hostSelectorOpen}
+              aria-label="Select active Docker host"
+              onClick={() => {
+                setHostSelectorOpen((value) => !value);
+              }}
+            >
+              <span className="host-selector-icon">
+                <Server size={15} />
+              </span>
+              <span className="host-selector-copy">
+                <span>INFRASTRUCTURE</span>
+                <strong>{activeHostName}</strong>
+              </span>
+              <ChevronDown size={14} className="host-chevron" />
+            </button>
+            {hostSelectorOpen && (
+              <>
+                <div
+                  className="host-selector-backdrop"
+                  role="presentation"
+                  onClick={() => {
+                    setHostSelectorOpen(false);
+                  }}
+                />
+                <ul className="host-selector-menu" role="listbox" aria-label="Docker hosts">
+                  <li>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={selectedHostId === null}
+                      className={`host-selector-option ${selectedHostId === null ? 'host-selector-option--active' : ''}`}
+                      onClick={() => {
+                        setSelectedHostId(null);
+                        setHostSelectorOpen(false);
+                      }}
+                    >
+                      <span className="host-selector-option-name">All hosts</span>
+                      <span className="host-selector-option-meta">
+                        {syncableHosts.length} registered
+                      </span>
+                    </button>
+                  </li>
+                  {syncableHosts.map((host) => (
+                    <li key={host.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={selectedHostId === host.id}
+                        className={`host-selector-option ${selectedHostId === host.id ? 'host-selector-option--active' : ''}`}
+                        onClick={() => {
+                          setSelectedHostId(host.id);
+                          setHostSelectorOpen(false);
+                        }}
+                      >
+                        <span className="host-selector-option-name">{host.name}</span>
+                        <span className="host-selector-option-meta">{host.status}</span>
+                      </button>
+                    </li>
+                  ))}
+                  {syncableHosts.length === 0 && (
+                    <li className="host-selector-empty">No hosts registered yet.</li>
+                  )}
+                </ul>
+              </>
+            )}
+          </div>
         </header>
         <nav className="sidebar-nav" aria-label="Main navigation">
           <span className="nav-section-label">WORKSPACE</span>
@@ -770,10 +846,22 @@ function OperatorConsole({
               <Radio size={15} />
             </span>
             <span>
-              <strong>No host agents connected</strong>
-              <span>Agent enrollment is planned for a later milestone.</span>
+              <strong>
+                {operationalStatus.mcpEnabled === null
+                  ? 'MCP gateway unknown'
+                  : operationalStatus.mcpEnabled
+                    ? 'MCP gateway active'
+                    : 'MCP gateway disabled'}
+              </strong>
+              <span>
+                {operationalStatus.activeAiCredentials === null
+                  ? 'Checking AI credentials…'
+                  : `${String(operationalStatus.activeAiCredentials)} active AI credential${operationalStatus.activeAiCredentials === 1 ? '' : 's'}`}
+              </span>
             </span>
-            <span className="agent-connector-dot" />
+            <span
+              className={`agent-connector-dot ${operationalStatus.mcpEnabled ? 'agent-connector-dot--live' : ''}`}
+            />
           </div>
           <button
             className="sidebar-user"

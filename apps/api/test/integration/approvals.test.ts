@@ -307,6 +307,81 @@ describe('AI credential management', () => {
     expect(malformed.statusCode).toBe(400);
   }, 30_000);
 
+  it('disables and re-enables a credential, gating MCP access on its state', async () => {
+    const credential = await createCredential(app, ownerCookie, {
+      name: 'lifecycle',
+      permissionLevel: 'read',
+    });
+
+    const disabled = await adminPost(`/ai-credentials/${credential.id}/disable`, ownerCookie, {});
+    expect(disabled.statusCode).toBe(200);
+    expect(
+      disabled.json<{ credential: { disabledAt: string | null } }>().credential.disabledAt,
+    ).not.toBeNull();
+
+    const blocked = await mcpPost(
+      endpoint,
+      { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+      { authorization: `Bearer ${credential.token}` },
+    );
+    expect(blocked.status).toBe(401);
+
+    const repeated = await adminPost(`/ai-credentials/${credential.id}/disable`, ownerCookie, {});
+    expect(repeated.statusCode).toBe(409);
+
+    const enabled = await adminPost(`/ai-credentials/${credential.id}/enable`, ownerCookie, {});
+    expect(enabled.statusCode).toBe(200);
+    expect(
+      enabled.json<{ credential: { disabledAt: string | null } }>().credential.disabledAt,
+    ).toBeNull();
+
+    const allowed = await mcpPost(
+      endpoint,
+      { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
+      { authorization: `Bearer ${credential.token}` },
+    );
+    expect(allowed.status).toBe(200);
+
+    const disabledRows = await auditRows('ai_credential.disabled');
+    expect(disabledRows).toHaveLength(1);
+    expect(disabledRows[0]?.actor_user_id).toBe(ownerId);
+    const enabledRows = await auditRows('ai_credential.enabled');
+    expect(enabledRows).toHaveLength(1);
+    expect(enabledRows[0]?.actor_user_id).toBe(ownerId);
+  }, 30_000);
+
+  it('rotates a credential token, invalidating the old token and keeping the credential', async () => {
+    const credential = await createCredential(app, ownerCookie, {
+      name: 'rotating',
+      permissionLevel: 'read',
+    });
+
+    const rotated = await adminPost(`/ai-credentials/${credential.id}/rotate`, ownerCookie, {});
+    expect(rotated.statusCode).toBe(201);
+    const payload = rotated.json<{ credential: { id: string }; token: string }>();
+    expect(payload.credential.id).toBe(credential.id);
+    expect(payload.token).toMatch(/^dpai_[A-Za-z0-9_-]{43}$/u);
+    expect(payload.token).not.toBe(credential.token);
+
+    const stale = await mcpPost(
+      endpoint,
+      { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+      { authorization: `Bearer ${credential.token}` },
+    );
+    expect(stale.status).toBe(401);
+
+    const fresh = await mcpPost(
+      endpoint,
+      { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
+      { authorization: `Bearer ${payload.token}` },
+    );
+    expect(fresh.status).toBe(200);
+
+    const stored = await client<{ text: string }[]>`
+      SELECT action || COALESCE(metadata::text, '') AS text FROM audit_logs`;
+    for (const row of stored) expect(row.text).not.toContain(payload.token);
+  }, 30_000);
+
   it('audits administrator credential mutations as human actions and never stores the token', async () => {
     const credential = await createCredential(app, ownerCookie, {
       name: 'audited-credential',

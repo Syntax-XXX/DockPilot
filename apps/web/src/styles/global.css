@@ -853,6 +853,7 @@ input:focus-visible {
 .sidebar {
   position: sticky;
   top: 0;
+  z-index: 50;
   display: flex;
   height: 100vh;
   flex-direction: column;
@@ -917,6 +918,65 @@ input:focus-visible {
 .host-chevron {
   margin-left: auto;
   color: #798699;
+}
+.host-selector-wrap {
+  position: relative;
+}
+.host-selector-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.host-selector-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 41;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #28323f;
+  border-radius: 7px;
+  background: #141922;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 45%);
+}
+.host-selector-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.host-selector-option:hover {
+  background: #1a2430;
+}
+.host-selector-option--active {
+  background: #192434;
+}
+.host-selector-option-name {
+  color: #e0e8f4;
+  font-size: 11px;
+  font-weight: 550;
+}
+.host-selector-option-meta {
+  color: #718097;
+  font: 8px var(--mono);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.host-selector-empty {
+  padding: 9px;
+  color: #718097;
+  font-size: 11px;
 }
 .sidebar-nav {
   display: flex;
@@ -1054,6 +1114,9 @@ input:focus-visible {
   margin: 3px 1px 0 auto;
   border-radius: 50%;
   background: #dda960;
+}
+.agent-connector-dot--live {
+  background: #6bbf7a;
 }
 .sidebar-user {
   display: flex;

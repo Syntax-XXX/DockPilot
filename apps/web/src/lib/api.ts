@@ -13,13 +13,16 @@ import {
   containerViewResponseSchema,
   createAiCredentialResponseSchema,
   createHostResponseSchema,
+  disableAiCredentialResponseSchema,
   dockerSummaryResponseSchema,
+  enableAiCredentialResponseSchema,
   hostDiagnosticsResponseSchema,
   hostListResponseSchema,
   hostViewSchema,
   imageListResponseSchema,
   networkListResponseSchema,
   revokeAiCredentialResponseSchema,
+  rotateAiCredentialResponseSchema,
   sessionResponseSchema,
   systemStatusSchema,
   updateHostResponseSchema,
@@ -219,6 +222,32 @@ export function revokeAiCredential(id: string): Promise<{ credential: AiCredenti
     `/ai-credentials/${encodeURIComponent(id)}/revoke`,
     { method: 'POST', body: '{}' },
     revokeAiCredentialResponseSchema,
+  );
+}
+
+export function disableAiCredential(id: string): Promise<{ credential: AiCredentialView }> {
+  return requestAdmin(
+    `/ai-credentials/${encodeURIComponent(id)}/disable`,
+    { method: 'POST', body: '{}' },
+    disableAiCredentialResponseSchema,
+  );
+}
+
+export function enableAiCredential(id: string): Promise<{ credential: AiCredentialView }> {
+  return requestAdmin(
+    `/ai-credentials/${encodeURIComponent(id)}/enable`,
+    { method: 'POST', body: '{}' },
+    enableAiCredentialResponseSchema,
+  );
+}
+
+export function rotateAiCredential(
+  id: string,
+): Promise<{ credential: AiCredentialView; token: string }> {
+  return requestAdmin(
+    `/ai-credentials/${encodeURIComponent(id)}/rotate`,
+    { method: 'POST', body: '{}' },
+    rotateAiCredentialResponseSchema,
   );
 }
 

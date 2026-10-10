@@ -215,7 +215,8 @@ Administrator-only REST routes, for roles `owner` and `admin`, live under `/api/
 
 - `GET /system-status`
 - `GET /ai-credentials` and `POST /ai-credentials`
-- `POST /ai-credentials/:id/revoke`
+- `POST /ai-credentials/:id/revoke`, `POST /ai-credentials/:id/disable`, and `POST /ai-credentials/:id/enable` — revoke permanently, or temporarily suspend and resume a credential without losing it.
+- `POST /ai-credentials/:id/rotate` — issue a replacement token and invalidate the previous one.
 - `GET /audit-events` and `GET /audit-events/:id`
 - `GET /approvals` and `POST /approvals/:id/decision`
 - `GET /hosts` and `POST /hosts` — register and list Docker hosts.
@@ -233,7 +234,7 @@ The create credential response is the only place a token is ever returned.
 
 All list endpoints use server-side keyset pagination with a bounded page size, so the browser never loads the whole log. Filters include credential, tool, action, outcome, target, and a time range. Stored values stay redacted when an administrator opens an individual event.
 
-The dashboard exposes the same data through an **AI control area**: create and revoke AI credentials, review the audit log with filters, pagination, and per-event detail, and decide pending approvals. Destructive requests are presented as approvals to grant or refuse, never as actions already taken.
+The dashboard exposes the same data through an **AI control area**: create, disable, enable, rotate, and revoke AI credentials, review the audit log with filters, pagination, and per-event detail, and decide pending approvals. Destructive requests are presented as approvals to grant or refuse, never as actions already taken.
 
 ## Configuration
 
