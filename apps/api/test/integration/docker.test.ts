@@ -594,6 +594,72 @@ describe('Docker insights surface', () => {
     expect(request.structuredContent?.targetType).toBe('image');
     expect(fixture.removedImages).toHaveLength(0);
   }, 30_000);
+
+  it('lists host volumes and networks over REST', async () => {
+    const hostId = await registerHost(ownerCookie);
+
+    const volumes = await adminGet(`/hosts/${hostId}/volumes`, ownerCookie);
+    expect(volumes.statusCode).toBe(200);
+    const volumeList = volumes.json<{
+      volumes: { name: string; driver: string; mountpoint: string; scope: string }[];
+      nextCursor: string | null;
+    }>();
+    expect(volumeList.volumes).toHaveLength(1);
+    expect(volumeList.volumes[0]).toMatchObject({
+      name: 'fixture-data',
+      driver: 'local',
+      scope: 'local',
+    });
+    expect(volumeList.nextCursor).toBeNull();
+
+    const networks = await adminGet(`/hosts/${hostId}/networks`, ownerCookie);
+    expect(networks.statusCode).toBe(200);
+    const networkList = networks.json<{
+      networks: {
+        id: string;
+        name: string;
+        driver: string;
+        internal: boolean;
+        containerCount: number;
+      }[];
+      nextCursor: string | null;
+    }>();
+    expect(networkList.networks).toHaveLength(1);
+    expect(networkList.networks[0]?.name).toBe('fixture-bridge');
+    expect(networkList.networks[0]?.driver).toBe('bridge');
+    expect(networkList.networks[0]?.internal).toBe(false);
+    expect(networkList.networks[0]?.containerCount).toBe(2);
+  }, 30_000);
+
+  it('keeps volume and network listings organization-scoped', async () => {
+    const missing = 'b7ba6c0e-e4d6-4b2c-88ee-8a7384f43128';
+    const volumes = await adminGet(`/hosts/${missing}/volumes`, ownerCookie);
+    expect(volumes.statusCode).toBe(404);
+    const networks = await adminGet(`/hosts/${missing}/networks`, ownerCookie);
+    expect(networks.statusCode).toBe(404);
+  }, 30_000);
+
+  it('exposes volumes and networks through MCP read tools', async () => {
+    const hostId = await registerHost(ownerCookie);
+
+    const reader = await createCredential(app, ownerCookie, {
+      name: 'topology-reader',
+      permissionLevel: 'read',
+    });
+    const mcpClient = await connect(reader.token);
+
+    const volumes = await callTool(mcpClient, 'dockpilot_list_volumes', { hostId });
+    expect(volumes.isError).toBe(false);
+    const listedVolumes = asArray(volumes.structuredContent?.volumes);
+    expect(listedVolumes).toHaveLength(1);
+    expect(asRecord(listedVolumes[0])?.name).toBe('fixture-data');
+
+    const networks = await callTool(mcpClient, 'dockpilot_list_networks', { hostId });
+    expect(networks.isError).toBe(false);
+    const listedNetworks = asArray(networks.structuredContent?.networks);
+    expect(listedNetworks).toHaveLength(1);
+    expect(asRecord(listedNetworks[0])?.name).toBe('fixture-bridge');
+  }, 30_000);
 });
 
 function asRecord(value: unknown): Record<string, unknown> | null {

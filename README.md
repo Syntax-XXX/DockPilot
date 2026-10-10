@@ -15,7 +15,7 @@ DockPilot is a web dashboard, a typed API, and an MCP control layer for external
 - Revocable server-side sessions.
 - A relational PostgreSQL schema with organization scoping, sessions, audit logs, AI credentials, and approval records.
 - A secure MCP control layer so an external AI agent can inspect DockPilot and request narrowly scoped changes, with human approval required for destructive work.
-- A Docker vertical slice: register a Docker host over an allowlisted socket, sync and browse its containers, read logs, sample live CPU/memory/network stats, and start, stop, or restart containers. Host images can be browsed and dangling images flagged, and a read-only Docker Doctor runs connectivity, stopped-container, and storage checks against a host.
+- A Docker vertical slice: register a Docker host over an allowlisted socket, sync and browse its containers, read logs, sample live CPU/memory/network stats, and start, stop, or restart containers. Host images, volumes, and networks can be browsed (dangling images are flagged), and a read-only Docker Doctor runs connectivity, stopped-container, and storage checks against a host.
 - Admin-visible AI credential management, AI activity logs, and an approval inbox.
 - Rate limiting, input validation, correlation IDs, and append-only audit logging.
 - A themed `install.sh` that verifies prerequisites, generates secrets, starts local PostgreSQL, migrates, and starts the stack.
@@ -24,7 +24,7 @@ DockPilot is a web dashboard, a typed API, and an MCP control layer for external
 ## What does not work yet
 
 - Only Docker **hosts** registered over unix sockets are supported. There is no remote agent enrollment, no TLS-secured remote Docker endpoint, and no multi-host scheduling.
-- Volumes, networks, image pulls/builds, exec into containers, backup/restore, notifications, update execution, integrations, and automation are future work. They are not implemented and are not presented as working features.
+- Volume and network inventories are read-only; there is no create/remove/prune lifecycle for them. Image pulls/builds, exec into containers, backup/restore, notifications, update execution, integrations, and automation are future work. They are not implemented and are not presented as working features.
 - The MCP tools operate on Docker hosts and DockPilot's own data. There is no shell execution tool, no arbitrary SQL tool, and no generic "execute anything" tool. Container removal, host removal, and image removal are never executed directly by an agent — they only create approvals.
 - Destructive actions that can be approved and executed today: session revocation, AI credential revocation, container removal, host removal, and image removal.
 - DockPilot still provisions a single organization with a single initial owner. Multi-tenant administration and finer-grained roles are not implemented.
@@ -162,6 +162,8 @@ Permissions are ordered `read`, `write`, `destructive` from least to most privil
 - `dockpilot_get_container_logs` — **read**. Returns a bounded tail of a container's logs.
 - `dockpilot_get_container_stats` — **read**. Returns one CPU, memory, network, and block I/O sample for a container.
 - `dockpilot_list_images` — **read**. Lists the images present on a host.
+- `dockpilot_list_volumes` — **read**. Lists the volumes present on a host.
+- `dockpilot_list_networks` — **read**. Lists the networks present on a host.
 - `dockpilot_run_host_diagnostics` — **read**. Runs read-only Docker Doctor checks against a host.
 - `dockpilot_docker_summary` — **read**. Returns organization-scoped host and container counts.
 - `dockpilot_create_host` — **write**. Registers a Docker host over an allowlisted socket.

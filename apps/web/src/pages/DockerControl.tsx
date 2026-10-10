@@ -20,7 +20,9 @@ import type {
   HostDiagnostics,
   HostView,
   ImageView,
+  NetworkView,
   SafeUser,
+  VolumeView,
 } from '@dockpilot/shared';
 import {
   ApiError,
@@ -32,6 +34,8 @@ import {
   fetchContainers,
   fetchHosts,
   fetchImages,
+  fetchNetworks,
+  fetchVolumes,
   refreshHost,
   requestContainerRemoval,
   requestHostRemoval,
@@ -43,7 +47,7 @@ import {
   syncHost,
 } from '../lib/api.js';
 
-export type DockerSection = 'hosts' | 'containers' | 'images' | 'doctor';
+export type DockerSection = 'hosts' | 'containers' | 'images' | 'volumes' | 'networks' | 'doctor';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -95,6 +99,10 @@ export function DockerControl({
           onSelectHost={onSelectHost}
           notify={notify}
         />
+      ) : section === 'volumes' ? (
+        <VolumesPanel selectedHostId={selectedHostId} onSelectHost={onSelectHost} />
+      ) : section === 'networks' ? (
+        <NetworksPanel selectedHostId={selectedHostId} onSelectHost={onSelectHost} />
       ) : section === 'doctor' ? (
         <DoctorPanel selectedHostId={selectedHostId} onSelectHost={onSelectHost} />
       ) : (
@@ -1007,6 +1015,252 @@ function ImagesPanel({
             </div>
           )}
         </>
+      )}
+    </>
+  );
+}
+function VolumesPanel({
+  selectedHostId,
+  onSelectHost,
+}: {
+  selectedHostId: string | null;
+  onSelectHost: (hostId: string | null) => void;
+}) {
+  const [hosts, setHosts] = useState<HostView[]>([]);
+  const [volumes, setVolumes] = useState<VolumeView[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setState('loading');
+    setError(null);
+    try {
+      const page = await fetchHosts();
+      setHosts(page.hosts);
+      const target = selectedHostId ?? page.hosts[0]?.id ?? null;
+      if (target !== null && target !== selectedHostId) onSelectHost(target);
+      if (target === null) {
+        setVolumes([]);
+      } else {
+        const volumePage = await fetchVolumes(target);
+        setVolumes(volumePage.volumes);
+      }
+      setState('ready');
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setState('error');
+    }
+  }, [selectedHostId, onSelectHost]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <>
+      <PanelHeading
+        eyebrow="RESOURCES"
+        title="Volumes"
+        description="Browse the Docker volumes defined on a host. Volumes are read-only in this view."
+        icon={HardDrive}
+        actions={
+          <select
+            className="admin-select"
+            value={selectedHostId ?? ''}
+            onChange={(event) => {
+              onSelectHost(event.target.value === '' ? null : event.target.value);
+            }}
+            aria-label="Select host"
+          >
+            {hosts.length === 0 && <option value="">No hosts</option>}
+            {hosts.map((host) => (
+              <option key={host.id} value={host.id}>
+                {host.name}
+              </option>
+            ))}
+          </select>
+        }
+      />
+      {error !== null && <PanelNotice tone="error">{error}</PanelNotice>}
+      {hosts.length === 0 && state === 'ready' ? (
+        <div className="quiet-empty">
+          <span className="quiet-empty-icon">
+            <Server size={17} />
+          </span>
+          <span>
+            <strong>No Docker hosts registered.</strong>
+            <span>Register a host on the Hosts screen first.</span>
+          </span>
+          <span className="empty-line" />
+        </div>
+      ) : state === 'loading' ? (
+        <div className="admin-loading" aria-busy="true">
+          <Loader2 size={15} className="admin-spin" /> Loading volumes
+        </div>
+      ) : volumes.length === 0 ? (
+        <div className="quiet-empty">
+          <span className="quiet-empty-icon">
+            <HardDrive size={17} />
+          </span>
+          <span>
+            <strong>No volumes found.</strong>
+            <span>This host has no Docker volumes.</span>
+          </span>
+          <span className="empty-line" />
+        </div>
+      ) : (
+        <div className="admin-table-wrap">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Driver</th>
+                <th>Scope</th>
+                <th>Mountpoint</th>
+              </tr>
+            </thead>
+            <tbody>
+              {volumes.map((volume) => (
+                <tr key={volume.name}>
+                  <td>
+                    <strong>{volume.name}</strong>
+                  </td>
+                  <td>{volume.driver}</td>
+                  <td>{volume.scope}</td>
+                  <td className="admin-mono" title={volume.mountpoint}>
+                    {volume.mountpoint}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+function NetworksPanel({
+  selectedHostId,
+  onSelectHost,
+}: {
+  selectedHostId: string | null;
+  onSelectHost: (hostId: string | null) => void;
+}) {
+  const [hosts, setHosts] = useState<HostView[]>([]);
+  const [networks, setNetworks] = useState<NetworkView[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setState('loading');
+    setError(null);
+    try {
+      const page = await fetchHosts();
+      setHosts(page.hosts);
+      const target = selectedHostId ?? page.hosts[0]?.id ?? null;
+      if (target !== null && target !== selectedHostId) onSelectHost(target);
+      if (target === null) {
+        setNetworks([]);
+      } else {
+        const networkPage = await fetchNetworks(target);
+        setNetworks(networkPage.networks);
+      }
+      setState('ready');
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setState('error');
+    }
+  }, [selectedHostId, onSelectHost]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <>
+      <PanelHeading
+        eyebrow="RESOURCES"
+        title="Networks"
+        description="Browse the Docker networks defined on a host. Networks are read-only in this view."
+        icon={HardDrive}
+        actions={
+          <select
+            className="admin-select"
+            value={selectedHostId ?? ''}
+            onChange={(event) => {
+              onSelectHost(event.target.value === '' ? null : event.target.value);
+            }}
+            aria-label="Select host"
+          >
+            {hosts.length === 0 && <option value="">No hosts</option>}
+            {hosts.map((host) => (
+              <option key={host.id} value={host.id}>
+                {host.name}
+              </option>
+            ))}
+          </select>
+        }
+      />
+      {error !== null && <PanelNotice tone="error">{error}</PanelNotice>}
+      {hosts.length === 0 && state === 'ready' ? (
+        <div className="quiet-empty">
+          <span className="quiet-empty-icon">
+            <Server size={17} />
+          </span>
+          <span>
+            <strong>No Docker hosts registered.</strong>
+            <span>Register a host on the Hosts screen first.</span>
+          </span>
+          <span className="empty-line" />
+        </div>
+      ) : state === 'loading' ? (
+        <div className="admin-loading" aria-busy="true">
+          <Loader2 size={15} className="admin-spin" /> Loading networks
+        </div>
+      ) : networks.length === 0 ? (
+        <div className="quiet-empty">
+          <span className="quiet-empty-icon">
+            <HardDrive size={17} />
+          </span>
+          <span>
+            <strong>No networks found.</strong>
+            <span>This host has no Docker networks.</span>
+          </span>
+          <span className="empty-line" />
+        </div>
+      ) : (
+        <div className="admin-table-wrap">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Driver</th>
+                <th>Scope</th>
+                <th>Flags</th>
+                <th>Containers</th>
+              </tr>
+            </thead>
+            <tbody>
+              {networks.map((network) => (
+                <tr key={network.id}>
+                  <td>
+                    <strong>{network.name}</strong>
+                  </td>
+                  <td>{network.driver}</td>
+                  <td>{network.scope}</td>
+                  <td>
+                    {network.internal ? 'internal' : 'external'}
+                    {network.attachable ? ' · attachable' : ''}
+                  </td>
+                  <td>
+                    {network.containerCount} container{network.containerCount === 1 ? '' : 's'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </>
   );

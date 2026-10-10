@@ -131,6 +131,27 @@ export interface ImageSummary {
   Labels?: Record<string, string> | null;
 }
 
+export interface VolumeSummary {
+  Name: string;
+  Driver: string;
+  Mountpoint: string;
+  Scope: string;
+  CreatedAt?: string | null;
+  Labels?: Record<string, string> | null;
+}
+
+export interface NetworkSummary {
+  Id: string;
+  Name: string;
+  Driver: string;
+  Scope: string;
+  Internal?: boolean;
+  Attachable?: boolean;
+  Created?: string | null;
+  Containers?: Record<string, unknown> | null;
+  Labels?: Record<string, string> | null;
+}
+
 export type ContainerState =
   'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead' | 'unknown';
 
@@ -651,6 +672,18 @@ export async function listImages(endpoint: DockerEndpoint, all = true): Promise<
   const { body } = await dockerRequest(endpoint, 'GET', `/images/json?all=${all ? '1' : '0'}`);
   if (!Array.isArray(body)) return [];
   return body as ImageSummary[];
+}
+
+export async function listVolumes(endpoint: DockerEndpoint): Promise<VolumeSummary[]> {
+  const { body } = await dockerRequest(endpoint, 'GET', '/volumes');
+  const volumes = (body as { Volumes?: VolumeSummary[] | null }).Volumes;
+  return Array.isArray(volumes) ? volumes : [];
+}
+
+export async function listNetworks(endpoint: DockerEndpoint): Promise<NetworkSummary[]> {
+  const { body } = await dockerRequest(endpoint, 'GET', '/networks');
+  if (!Array.isArray(body)) return [];
+  return body as NetworkSummary[];
 }
 
 export async function removeImage(

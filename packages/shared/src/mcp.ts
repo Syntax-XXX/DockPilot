@@ -305,6 +305,32 @@ export const mcpToolOutputSchemas = {
     ),
     nextCursor: z.string().nullable(),
   }),
+  dockpilot_list_volumes: z.strictObject({
+    volumes: z.array(
+      z.strictObject({
+        name: z.string(),
+        driver: z.string(),
+        mountpoint: z.string(),
+        scope: z.string(),
+        createdAt: z.string().nullable(),
+      }),
+    ),
+    nextCursor: z.string().nullable(),
+  }),
+  dockpilot_list_networks: z.strictObject({
+    networks: z.array(
+      z.strictObject({
+        id: z.string(),
+        name: z.string(),
+        driver: z.string(),
+        scope: z.string(),
+        internal: z.boolean(),
+        attachable: z.boolean(),
+        containerCount: z.number().int().nonnegative(),
+      }),
+    ),
+    nextCursor: z.string().nullable(),
+  }),
   dockpilot_request_image_removal: z.strictObject({
     approvalRequired: z.literal(true),
     approvalId: z.string(),
@@ -424,6 +450,16 @@ export const mcpToolInputSchemas = {
     limit: boundedLimit.optional(),
     cursor: z.string().max(256).optional(),
   }),
+  dockpilot_list_volumes: z.strictObject({
+    hostId: z.uuid(),
+    limit: boundedLimit.optional(),
+    cursor: z.string().max(256).optional(),
+  }),
+  dockpilot_list_networks: z.strictObject({
+    hostId: z.uuid(),
+    limit: boundedLimit.optional(),
+    cursor: z.string().max(256).optional(),
+  }),
   dockpilot_request_image_removal: z.strictObject({
     hostId: z.uuid(),
     imageId: z.string().regex(/^sha256:[a-f0-9]{64}$/u, 'Invalid image reference.'),
@@ -457,6 +493,8 @@ export const mcpToolNameSchema = z.enum([
   'dockpilot_get_container_stats',
   'dockpilot_run_host_diagnostics',
   'dockpilot_list_images',
+  'dockpilot_list_volumes',
+  'dockpilot_list_networks',
   'dockpilot_request_image_removal',
   'dockpilot_docker_summary',
 ]);
@@ -615,6 +653,18 @@ export const mcpToolCatalog: Record<McpToolName, McpToolSecurityMetadata> = {
     permissionLevel: 'read',
     rateCategory: 'read',
     actionType: 'mcp.list_images',
+    destructive: false,
+  },
+  dockpilot_list_volumes: {
+    permissionLevel: 'read',
+    rateCategory: 'read',
+    actionType: 'mcp.list_volumes',
+    destructive: false,
+  },
+  dockpilot_list_networks: {
+    permissionLevel: 'read',
+    rateCategory: 'read',
+    actionType: 'mcp.list_networks',
     destructive: false,
   },
   dockpilot_request_image_removal: {

@@ -53,6 +53,8 @@ const validMinimalInputs: Record<McpToolName, Record<string, unknown>> = {
   dockpilot_get_container_stats: { containerId: sampleContainerId },
   dockpilot_run_host_diagnostics: { hostId: sampleUuid },
   dockpilot_list_images: { hostId: sampleUuid },
+  dockpilot_list_volumes: { hostId: sampleUuid },
+  dockpilot_list_networks: { hostId: sampleUuid },
   dockpilot_request_image_removal: {
     hostId: sampleUuid,
     imageId: `sha256:${'b'.repeat(64)}`,

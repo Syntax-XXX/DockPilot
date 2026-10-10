@@ -463,10 +463,53 @@ export const dockerSummarySchema = z
 
 export const dockerSummaryResponseSchema = z.object({ summary: dockerSummarySchema }).strict();
 
+export const volumeViewSchema = z
+  .object({
+    name: z.string(),
+    driver: z.string(),
+    mountpoint: z.string(),
+    scope: z.string(),
+    createdAt: isoDateTimeSchema.nullable(),
+    labels: z.record(z.string(), z.string()).nullable(),
+  })
+  .strict();
+
+export const volumeListResponseSchema = z
+  .object({
+    volumes: z.array(volumeViewSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+
+export const networkViewSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    driver: z.string(),
+    scope: z.string(),
+    internal: z.boolean(),
+    attachable: z.boolean(),
+    createdAt: isoDateTimeSchema.nullable(),
+    containerCount: z.number().int().nonnegative(),
+    labels: z.record(z.string(), z.string()).nullable(),
+  })
+  .strict();
+
+export const networkListResponseSchema = z
+  .object({
+    networks: z.array(networkViewSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+
 export type ContainerStats = z.infer<typeof containerStatsSchema>;
 export type DiagnosticSeverity = z.infer<typeof diagnosticSeveritySchema>;
 export type DiagnosticCheck = z.infer<typeof diagnosticCheckSchema>;
 export type HostDiagnostics = z.infer<typeof hostDiagnosticsSchema>;
 export type ImageView = z.infer<typeof imageViewSchema>;
+export type VolumeView = z.infer<typeof volumeViewSchema>;
+export type VolumeListResponse = z.infer<typeof volumeListResponseSchema>;
+export type NetworkView = z.infer<typeof networkViewSchema>;
+export type NetworkListResponse = z.infer<typeof networkListResponseSchema>;
 export type ImageListResponse = z.infer<typeof imageListResponseSchema>;
 export type DockerSummary = z.infer<typeof dockerSummarySchema>;

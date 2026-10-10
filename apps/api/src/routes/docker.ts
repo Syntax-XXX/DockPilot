@@ -15,8 +15,10 @@ import {
   hostViewSchema,
   idSchema,
   imageListResponseSchema,
+  networkListResponseSchema,
   updateHostInputSchema,
   updateHostResponseSchema,
+  volumeListResponseSchema,
   type SafeUser,
 } from '@dockpilot/shared';
 import { db } from '../db/index.js';
@@ -45,6 +47,8 @@ import {
   containerStats,
   getDockerSummary,
   listImages,
+  listNetworks,
+  listVolumes,
   runHostDiagnostics,
 } from '../services/docker-insights.js';
 import { createApproval } from '../services/approvals.js';
@@ -568,6 +572,48 @@ export function dockerRoutes(app: FastifyInstance): void {
       return created;
     });
     return reply.code(202).send(approvalRequestResponseSchema.parse({ approval }));
+  });
+
+  app.get('/hosts/:id/volumes', async (request, reply) => {
+    const user = requireCapability(request, reply, 'read');
+    if (user === null) return reply;
+    const params = hostParamsSchema.safeParse(request.params);
+    if (!params.success) return validationFailure(reply, 'The host identifier is not valid.');
+    const query = pageQuerySchema.safeParse(request.query);
+    if (!query.success) return validationFailure(reply, 'The pagination parameters are not valid.');
+
+    try {
+      const page = await listVolumes({
+        organizationId: user.organizationId,
+        hostId: params.data.id,
+        limit: query.data.limit,
+        cursor: query.data.cursor,
+      });
+      return await reply.send(volumeListResponseSchema.parse(page));
+    } catch (error) {
+      throw translateDockerError(error);
+    }
+  });
+
+  app.get('/hosts/:id/networks', async (request, reply) => {
+    const user = requireCapability(request, reply, 'read');
+    if (user === null) return reply;
+    const params = hostParamsSchema.safeParse(request.params);
+    if (!params.success) return validationFailure(reply, 'The host identifier is not valid.');
+    const query = pageQuerySchema.safeParse(request.query);
+    if (!query.success) return validationFailure(reply, 'The pagination parameters are not valid.');
+
+    try {
+      const page = await listNetworks({
+        organizationId: user.organizationId,
+        hostId: params.data.id,
+        limit: query.data.limit,
+        cursor: query.data.cursor,
+      });
+      return await reply.send(networkListResponseSchema.parse(page));
+    } catch (error) {
+      throw translateDockerError(error);
+    }
   });
 }
 

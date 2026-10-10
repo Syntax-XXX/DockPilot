@@ -18,10 +18,12 @@ import {
   hostListResponseSchema,
   hostViewSchema,
   imageListResponseSchema,
+  networkListResponseSchema,
   revokeAiCredentialResponseSchema,
   sessionResponseSchema,
   systemStatusSchema,
   updateHostResponseSchema,
+  volumeListResponseSchema,
   type AiCredentialView,
   type ApprovalView,
   type AuditEvent,
@@ -35,10 +37,12 @@ import {
   type HostView,
   type ImageView,
   type LoginInput,
+  type NetworkView,
   type SafeUser,
   type SetupAccountInput,
   type SystemStatus,
   type UpdateHostInput,
+  type VolumeView,
 } from '@dockpilot/shared';
 import { z } from 'zod';
 
@@ -459,5 +463,33 @@ export function requestImageRemoval(
     `/hosts/${encodeURIComponent(hostId)}/images`,
     { method: 'DELETE', body: JSON.stringify({ imageId, justification }) },
     approvalRequestResponseSchema,
+  );
+}
+
+export interface VolumePage {
+  volumes: VolumeView[];
+  nextCursor: string | null;
+}
+
+export function fetchVolumes(hostId: string, cursor?: string): Promise<VolumePage> {
+  const query = cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`;
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(hostId)}/volumes${query}`,
+    {},
+    volumeListResponseSchema,
+  );
+}
+
+export interface NetworkPage {
+  networks: NetworkView[];
+  nextCursor: string | null;
+}
+
+export function fetchNetworks(hostId: string, cursor?: string): Promise<NetworkPage> {
+  const query = cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`;
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(hostId)}/networks${query}`,
+    {},
+    networkListResponseSchema,
   );
 }

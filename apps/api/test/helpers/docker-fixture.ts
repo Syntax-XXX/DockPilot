@@ -18,11 +18,30 @@ export interface FixtureImage {
   containers: number;
 }
 
+export interface FixtureVolume {
+  name: string;
+  driver: string;
+  mountpoint: string;
+  scope: string;
+}
+
+export interface FixtureNetwork {
+  id: string;
+  name: string;
+  driver: string;
+  scope: string;
+  internal?: boolean;
+  attachable?: boolean;
+  containerCount?: number;
+}
+
 export interface DockerFixture {
   socketPath: string;
   endpoint: string;
   containers: FixtureContainer[];
   images: FixtureImage[];
+  volumes: FixtureVolume[];
+  networks: FixtureNetwork[];
   removedImages: string[];
   stop: () => Promise<void>;
 }
@@ -49,6 +68,8 @@ export async function startDockerFixture(
   options: {
     socketPath?: string;
     images?: FixtureImage[];
+    volumes?: FixtureVolume[];
+    networks?: FixtureNetwork[];
     state?: { running: boolean };
   } = {},
 ): Promise<DockerFixture> {
@@ -62,6 +83,23 @@ export async function startDockerFixture(
       repoTags: ['nginx:alpine'],
       size: 23_000_000,
       containers: 1,
+    },
+  ];
+  const volumes: FixtureVolume[] = options.volumes ?? [
+    {
+      name: 'fixture-data',
+      driver: 'local',
+      mountpoint: '/var/lib/docker/volumes/fixture-data/_data',
+      scope: 'local',
+    },
+  ];
+  const networks: FixtureNetwork[] = options.networks ?? [
+    {
+      id: 'c'.repeat(64),
+      name: 'fixture-bridge',
+      driver: 'bridge',
+      scope: 'local',
+      containerCount: 2,
     },
   ];
   const state = options.state ?? { running: true };
@@ -177,6 +215,45 @@ export async function startDockerFixture(
         );
         return;
       }
+      if (method === 'GET' && pathname === '/volumes') {
+        socket.end(
+          jsonBody({
+            Volumes: volumes.map((volume) => ({
+              Name: volume.name,
+              Driver: volume.driver,
+              Mountpoint: volume.mountpoint,
+              Scope: volume.scope,
+              CreatedAt: '2026-01-01T00:00:00Z',
+              Labels: {},
+            })),
+            Warnings: null,
+          }),
+        );
+        return;
+      }
+      if (method === 'GET' && pathname === '/networks') {
+        socket.end(
+          jsonBody(
+            networks.map((network) => ({
+              Id: network.id,
+              Name: network.name,
+              Driver: network.driver,
+              Scope: network.scope,
+              Internal: network.internal ?? false,
+              Attachable: network.attachable ?? false,
+              Created: '2026-01-01T00:00:00Z',
+              Containers: Object.fromEntries(
+                Array.from({ length: network.containerCount ?? 0 }, (_, index) => [
+                  `container-${String(index)}`,
+                  {},
+                ]),
+              ),
+              Labels: {},
+            })),
+          ),
+        );
+        return;
+      }
       const imageDeleteMatch = /^\/images\/(sha256:[a-f0-9]{64})$/u.exec(pathname);
       if (method === 'DELETE' && imageDeleteMatch) {
         removedImages.push(imageDeleteMatch[1] ?? '');
@@ -238,6 +315,8 @@ export async function startDockerFixture(
     endpoint: `unix://${socketPath}`,
     containers,
     images,
+    volumes,
+    networks,
     removedImages,
     stop: async () => {
       await new Promise<void>((resolve) => {

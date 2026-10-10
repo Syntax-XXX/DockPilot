@@ -42,6 +42,8 @@ import {
   containerStats,
   getDockerSummary,
   listImages,
+  listNetworks,
+  listVolumes,
   runHostDiagnostics,
 } from '../services/docker-insights.js';
 
@@ -757,6 +759,66 @@ export const mcpToolRegistry = {
           containerCount: image.containerCount,
           dangling: image.dangling,
           createdAt: image.createdAt,
+        })),
+        nextCursor: page.nextCursor,
+      };
+    },
+  }),
+
+  dockpilot_list_volumes: createTool({
+    name: 'dockpilot_list_volumes',
+    title: 'List host volumes',
+    description: 'Lists the Docker volumes present on a registered Docker host.',
+    mutates: false,
+    resourceType: 'volume',
+    outputSchema: mcpToolOutputSchemas.dockpilot_list_volumes,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_list_volumes.parse(input);
+      const page = await listVolumes({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        limit: parsed.limit ?? defaultToolPageSize,
+        cursor: parsed.cursor,
+        executor: context.executor,
+      });
+      return {
+        volumes: page.volumes.map((volume) => ({
+          name: volume.name,
+          driver: volume.driver,
+          mountpoint: volume.mountpoint,
+          scope: volume.scope,
+          createdAt: volume.createdAt,
+        })),
+        nextCursor: page.nextCursor,
+      };
+    },
+  }),
+
+  dockpilot_list_networks: createTool({
+    name: 'dockpilot_list_networks',
+    title: 'List host networks',
+    description: 'Lists the Docker networks present on a registered Docker host.',
+    mutates: false,
+    resourceType: 'network',
+    outputSchema: mcpToolOutputSchemas.dockpilot_list_networks,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_list_networks.parse(input);
+      const page = await listNetworks({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        limit: parsed.limit ?? defaultToolPageSize,
+        cursor: parsed.cursor,
+        executor: context.executor,
+      });
+      return {
+        networks: page.networks.map((network) => ({
+          id: network.id,
+          name: network.name,
+          driver: network.driver,
+          scope: network.scope,
+          internal: network.internal,
+          attachable: network.attachable,
+          containerCount: network.containerCount,
         })),
         nextCursor: page.nextCursor,
       };

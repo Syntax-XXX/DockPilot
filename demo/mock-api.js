@@ -205,6 +205,57 @@
     }));
   }
 
+  function demoVolumes(hostId) {
+    const names = ['dockpilot-data', 'pgdata', 'agent-config'];
+    const hostIndex = Math.max(
+      0,
+      state.hosts.findIndex((item) => item.id === hostId),
+    );
+    return names.map((name, index) => ({
+      name: `${name}-${hostIndex + 1}`,
+      driver: 'local',
+      mountpoint: `/var/lib/docker/volumes/${name}-${hostIndex + 1}/_data`,
+      scope: 'local',
+      createdAt: new Date(Date.now() - 86_400_000 * (index + 2)).toISOString(),
+      labels: {},
+    }));
+  }
+
+  function demoNetworks(hostId) {
+    const specs = [
+      { name: 'bridge', driver: 'bridge', internal: false, attachable: false, containerCount: 2 },
+      {
+        name: 'dockpilot-net',
+        driver: 'bridge',
+        internal: false,
+        attachable: true,
+        containerCount: 3,
+      },
+      {
+        name: 'internal-only',
+        driver: 'bridge',
+        internal: true,
+        attachable: false,
+        containerCount: 0,
+      },
+    ];
+    const hostIndex = Math.max(
+      0,
+      state.hosts.findIndex((item) => item.id === hostId),
+    );
+    return specs.map((spec, index) => ({
+      id: dockerId(hostIndex * 20 + index + 90),
+      name: spec.name,
+      driver: spec.driver,
+      scope: 'local',
+      internal: spec.internal,
+      attachable: spec.attachable,
+      createdAt: new Date(Date.now() - 86_400_000 * (index + 3)).toISOString(),
+      containerCount: spec.containerCount,
+      labels: {},
+    }));
+  }
+
   function systemStatus() {
     return {
       setupRequired: !state.user,
@@ -534,6 +585,18 @@
     if (hostContainersMatch && method === 'GET') {
       const containers = state.containers.filter((item) => item.hostId === hostContainersMatch[1]);
       return json({ containers, nextCursor: null });
+    }
+    const hostVolumesMatch = path.match(/^\/api\/v1\/admin\/hosts\/([^/]+)\/volumes$/);
+    if (hostVolumesMatch && method === 'GET') {
+      const host = state.hosts.find((item) => item.id === hostVolumesMatch[1]);
+      if (!host) return error('NOT_FOUND', 'Host not found.', 404);
+      return json({ volumes: demoVolumes(host.id), nextCursor: null });
+    }
+    const hostNetworksMatch = path.match(/^\/api\/v1\/admin\/hosts\/([^/]+)\/networks$/);
+    if (hostNetworksMatch && method === 'GET') {
+      const host = state.hosts.find((item) => item.id === hostNetworksMatch[1]);
+      if (!host) return error('NOT_FOUND', 'Host not found.', 404);
+      return json({ networks: demoNetworks(host.id), nextCursor: null });
     }
     const hostImagesMatch = path.match(/^\/api\/v1\/admin\/hosts\/([^/]+)\/images$/);
     if (hostImagesMatch && method === 'GET') {

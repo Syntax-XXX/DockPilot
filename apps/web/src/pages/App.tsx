@@ -707,8 +707,22 @@ function OperatorConsole({
               setSection('images');
             }}
           />
-          <NavItem icon={Database} title="Volumes" />
-          <NavItem icon={Network} title="Networks" />
+          <SectionNavItem
+            icon={Database}
+            title="Volumes"
+            active={section === 'volumes'}
+            onSelect={() => {
+              setSection('volumes');
+            }}
+          />
+          <SectionNavItem
+            icon={Network}
+            title="Networks"
+            active={section === 'networks'}
+            onSelect={() => {
+              setSection('networks');
+            }}
+          />
           <div className="sidebar-nav-divider" />
           <span className="nav-section-label nav-section-label--spaced">INTELLIGENCE</span>
           <SectionNavItem
@@ -719,8 +733,6 @@ function OperatorConsole({
               setSection('doctor');
             }}
           />
-          <NavItem icon={ShieldCheck} title="Backups" badge="SOON" />
-          <NavItem icon={Activity} title="Alerts" />
           {administrator && (
             <>
               <div className="sidebar-nav-divider" />
@@ -968,19 +980,47 @@ function OperatorConsole({
                     </span>
                     GETTING STARTED<span className="connect-underscore">_</span>
                   </div>
-                  <h2>Nothing to see. Yet.</h2>
-                  <p>
-                    DockPilot is connected and ready. Add an agent to a Docker host to bring your
-                    infrastructure into focus. Real container and server data will show up here as
-                    soon as a host checks in.
-                  </p>
-                  <button
-                    className="button button--connect"
-                    disabled
-                    title="Agent enrollment is being built in milestone 2"
-                  >
-                    Connect a Docker host <ArrowRight size={15} />
-                  </button>
+                  {dockerSummary !== null && dockerSummary.hosts > 0 ? (
+                    <>
+                      <h2>
+                        {dockerSummary.hosts} host{dockerSummary.hosts === 1 ? '' : 's'} connected.
+                      </h2>
+                      <p>
+                        DockPilot is managing your Docker infrastructure. {dockerSummary.containers}{' '}
+                        container{dockerSummary.containers === 1 ? '' : 's'} synced
+                        {dockerSummary.lastSyncedAt !== null
+                          ? `, last synced ${new Date(dockerSummary.lastSyncedAt).toLocaleString()}`
+                          : ''}
+                        .
+                      </p>
+                      <button
+                        className="button button--connect"
+                        onClick={() => {
+                          setSection('hosts');
+                        }}
+                      >
+                        Open Docker hosts <ArrowRight size={15} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <h2>Register your first Docker host.</h2>
+                      <p>
+                        DockPilot connects to Docker hosts over an allowlisted local socket.
+                        Register a host to sync and browse its containers, read logs, and control
+                        container state.
+                      </p>
+                      <button
+                        className="button button--connect"
+                        onClick={() => {
+                          setSection(administrator ? 'hosts' : 'containers');
+                        }}
+                      >
+                        {administrator ? 'Register a Docker host' : 'View Docker hosts'}{' '}
+                        <ArrowRight size={15} />
+                      </button>
+                    </>
+                  )}
                   <span className="connect-preflight">
                     <Shield size={12} /> Host credentials stay on your own server.
                   </span>
@@ -1126,10 +1166,20 @@ function OperatorConsole({
                       </>,
                     )}
                     <div className="health-row">
-                      <span className="health-indicator health-indicator--amber" />
-                      <span className="health-row-label">Host agents</span>
-                      <span className="health-status health-status--muted">Not implemented</span>
-                      <Radio size={14} className="health-check health-check--muted" />
+                      <span
+                        className={`health-indicator ${dockerSummary !== null && dockerSummary.hosts > 0 ? 'health-indicator--green' : 'health-indicator--amber'}`}
+                      />
+                      <span className="health-row-label">Docker hosts</span>
+                      <span
+                        className={`health-status ${dockerSummary !== null && dockerSummary.hosts > 0 ? 'health-status--green' : 'health-status--muted'}`}
+                      >
+                        {dockerSummary === null
+                          ? 'Checking'
+                          : dockerSummary.hosts === 0
+                            ? 'None registered'
+                            : `${String(dockerSummary.hosts)} registered`}
+                      </span>
+                      <Server size={14} className="health-check health-check--muted" />
                     </div>
                     <div className="health-footer">
                       <ShieldCheck size={13} /> Your account and session are protected.
@@ -1159,6 +1209,8 @@ function OperatorConsole({
           ) : section === 'hosts' ||
             section === 'containers' ||
             section === 'images' ||
+            section === 'volumes' ||
+            section === 'networks' ||
             section === 'doctor' ? (
             <DockerControl
               section={section}
@@ -1198,6 +1250,8 @@ function sectionTitle(section: ConsoleSection): string {
   if (section === 'hosts') return 'Hosts';
   if (section === 'containers') return 'Containers';
   if (section === 'images') return 'Images';
+  if (section === 'volumes') return 'Volumes';
+  if (section === 'networks') return 'Networks';
   if (section === 'doctor') return 'Docker Doctor';
   return 'Overview';
 }
@@ -1260,32 +1314,5 @@ function StatCard({
       <strong className="stat-value">{value}</strong>
       <span className="stat-sub">{sub}</span>
     </article>
-  );
-}
-
-function NavItem({
-  icon: Icon,
-  title,
-  badge,
-}: {
-  icon: LucideIcon;
-  title: string;
-  badge?: string;
-}) {
-  return (
-    <a
-      className="nav-item nav-item--disabled"
-      href="#overview"
-      aria-disabled="true"
-      onClick={(event) => {
-        event.preventDefault();
-      }}
-    >
-      <span className="nav-icon">
-        <Icon size={17} />
-      </span>
-      {title}
-      {badge && <span className="nav-soon">{badge}</span>}
-    </a>
   );
 }

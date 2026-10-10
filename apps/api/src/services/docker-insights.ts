@@ -6,6 +6,8 @@ import {
   containerStats as dockerContainerStats,
   listContainers as dockerListContainers,
   listImages as dockerListImages,
+  listNetworks as dockerListNetworks,
+  listVolumes as dockerListVolumes,
   removeImage as dockerRemoveImage,
   systemInfo as dockerSystemInfo,
   verifyDockerSocket,
@@ -21,6 +23,8 @@ import type {
   DockerSummary,
   HostDiagnostics,
   ImageView,
+  NetworkView,
+  VolumeView,
 } from '@dockpilot/shared';
 
 const severityRank: Record<DiagnosticSeverity, number> = {
@@ -61,6 +65,48 @@ function toImageView(image: {
     containerCount: image.Containers ?? 0,
     dangling: isDanglingImage(image),
     createdAt: new Date(image.Created * 1000).toISOString(),
+  };
+}
+
+function toVolumeView(volume: {
+  Name: string;
+  Driver: string;
+  Mountpoint: string;
+  Scope: string;
+  CreatedAt?: string | null;
+  Labels?: Record<string, string> | null;
+}): VolumeView {
+  return {
+    name: volume.Name,
+    driver: volume.Driver,
+    mountpoint: volume.Mountpoint,
+    scope: volume.Scope,
+    createdAt: volume.CreatedAt ?? null,
+    labels: volume.Labels ?? null,
+  };
+}
+
+function toNetworkView(network: {
+  Id: string;
+  Name: string;
+  Driver: string;
+  Scope: string;
+  Internal?: boolean;
+  Attachable?: boolean;
+  Created?: string | null;
+  Containers?: Record<string, unknown> | null;
+  Labels?: Record<string, string> | null;
+}): NetworkView {
+  return {
+    id: network.Id,
+    name: network.Name,
+    driver: network.Driver,
+    scope: network.Scope,
+    internal: network.Internal === true,
+    attachable: network.Attachable === true,
+    createdAt: network.Created ?? null,
+    containerCount: network.Containers ? Object.keys(network.Containers).length : 0,
+    labels: network.Labels ?? null,
   };
 }
 
@@ -349,5 +395,73 @@ export async function getDockerSummary(input: {
         : typeof lastSyncedAt === 'string'
           ? lastSyncedAt
           : null,
+  };
+}
+
+export interface ListVolumesInput {
+  organizationId: string;
+  hostId: string;
+  limit: number;
+  cursor?: string | undefined;
+  executor?: DbExecutor;
+}
+
+export async function listVolumes(
+  input: ListVolumesInput,
+): Promise<{ volumes: VolumeView[]; nextCursor: string | null }> {
+  const executor = input.executor ?? db;
+  const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
+  if (input.cursor && !cursor) throw validationError('The pagination cursor is not valid.');
+
+  const host = await getOperableHost({
+    organizationId: input.organizationId,
+    hostId: input.hostId,
+    executor,
+  });
+  const endpoint = parseDockerEndpoint(host.endpoint);
+  const raw = await dockerListVolumes(endpoint);
+  const views = raw.map(toVolumeView).sort((a, b) => a.name.localeCompare(b.name));
+
+  const startIndex = cursor ? Math.max(0, Number(cursor[0]) || 0) : 0;
+  const slice = views.slice(startIndex, startIndex + input.limit);
+  const nextIndex = startIndex + input.limit;
+
+  return {
+    volumes: slice,
+    nextCursor: nextIndex < views.length ? encodeCursor([String(nextIndex), 'volume']) : null,
+  };
+}
+
+export interface ListNetworksInput {
+  organizationId: string;
+  hostId: string;
+  limit: number;
+  cursor?: string | undefined;
+  executor?: DbExecutor;
+}
+
+export async function listNetworks(
+  input: ListNetworksInput,
+): Promise<{ networks: NetworkView[]; nextCursor: string | null }> {
+  const executor = input.executor ?? db;
+  const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
+  if (input.cursor && !cursor) throw validationError('The pagination cursor is not valid.');
+
+  const host = await getOperableHost({
+    organizationId: input.organizationId,
+    hostId: input.hostId,
+    executor,
+  });
+  const endpoint = parseDockerEndpoint(host.endpoint);
+  const raw = await dockerListNetworks(endpoint);
+  const views = raw.map(toNetworkView).sort((a, b) => a.name.localeCompare(b.name));
+
+  const startIndex = cursor ? Math.max(0, Number(cursor[0]) || 0) : 0;
+  const slice = views.slice(startIndex, startIndex + input.limit);
+  const nextIndex = startIndex + input.limit;
+
+  return {
+    networks: slice,
+    nextCursor: nextIndex < views.length ? encodeCursor([String(nextIndex), 'network']) : null,
   };
 }
