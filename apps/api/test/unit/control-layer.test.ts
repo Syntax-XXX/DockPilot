@@ -27,6 +27,16 @@ import {
   isAiTokenShape,
   timingSafeHexEqual,
 } from '../../src/lib/ai-token.js';
+import {
+  demuxDockerLogs,
+  DockerApiError,
+  containerLogs,
+  socketExists,
+} from '../../src/lib/docker.js';
+import { createServer } from 'node:net';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 const redacted = '[REDACTED]';
 const truncated = '[TRUNCATED]';
@@ -219,6 +229,220 @@ describe('keyset pagination cursors', () => {
     expect(decodeCursor(toCursor([timestamp, 'id', 'extra']))).toBeUndefined();
     expect(decodeCursor(toCursor([timestamp, '']))).toBeUndefined();
     expect(decodeCursor(toCursor([timestamp, 'x'.repeat(65)]))).toBeUndefined();
+  });
+});
+
+describe('Docker socket validation', () => {
+  it('recognizes Unix sockets but rejects regular files and missing paths', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'dockpilot-docker-socket-test-'));
+    const socketPath = path.join(directory, 'docker.sock');
+    const filePath = path.join(directory, 'not-a-socket');
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+    try {
+      await writeFile(filePath, 'not a socket');
+      expect(socketExists(socketPath)).toBe(true);
+      expect(socketExists(filePath)).toBe(false);
+      expect(socketExists(path.join(directory, 'missing.sock'))).toBe(false);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Docker log retrieval', () => {
+  const containerId = 'a'.repeat(64);
+
+  it('returns streamed log bytes and reports Docker HTTP errors without throwing from events', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'dockpilot-docker-test-'));
+    const socketPath = path.join(directory, 'docker.sock');
+    const server = createServer((socket) => {
+      let request = '';
+      socket.on('data', (chunk) => {
+        request += chunk.toString();
+        if (!request.includes('\r\n\r\n')) return;
+        socket.write(
+          'HTTP/1.1 500 Internal Server Error\r\nContent-Length: 13\r\n\r\nDocker failed',
+        );
+        socket.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+    try {
+      await expect(containerLogs({ kind: 'unix', socketPath }, containerId)).rejects.toMatchObject({
+        name: 'DockerApiError',
+        status: 500,
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects oversized logs as a bounded API error instead of an uncaught stream exception', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'dockpilot-docker-test-'));
+    const socketPath = path.join(directory, 'docker.sock');
+    const server = createServer((socket) => {
+      socket.on('data', () => {
+        socket.write('HTTP/1.1 200 OK\r\nContent-Length: 16\r\n\r\n0123456789abcdef');
+        socket.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+    try {
+      await expect(
+        containerLogs({ kind: 'unix', socketPath }, containerId, 10, 8),
+      ).rejects.toMatchObject({
+        name: 'DockerApiError',
+        status: 413,
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('times out when Docker accepts the request but never sends response headers', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'dockpilot-docker-timeout-test-'));
+    const socketPath = path.join(directory, 'docker.sock');
+    const server = createServer((socket) => {
+      socket.on('data', () => undefined);
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const startedAt = performance.now();
+
+    try {
+      await expect(
+        containerLogs({ kind: 'unix', socketPath }, containerId, 10, 1024, 30),
+      ).rejects.toMatchObject({ name: 'DockerConnectionError' });
+      expect(performance.now() - startedAt).toBeLessThan(500);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a log response that stalls after sending its headers', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'dockpilot-docker-timeout-test-'));
+    const socketPath = path.join(directory, 'docker.sock');
+    const server = createServer((socket) => {
+      socket.on('data', () => {
+        socket.write('HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n');
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const startedAt = performance.now();
+
+    try {
+      await expect(
+        containerLogs({ kind: 'unix', socketPath }, containerId, 10, 1024, 30),
+      ).rejects.toMatchObject({ name: 'DockerConnectionError' });
+      expect(performance.now() - startedAt).toBeLessThan(500);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('classifies a log request that disconnects before the response as a connection failure', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'dockpilot-docker-disconnect-test-'));
+    const socketPath = path.join(directory, 'docker.sock');
+    const server = createServer((socket) => {
+      socket.on('data', () => socket.destroy());
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+    try {
+      await expect(
+        containerLogs({ kind: 'unix', socketPath }, containerId, 10, 1024),
+      ).rejects.toMatchObject({ name: 'DockerConnectionError' });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('demultiplexes a maximum-size framed log buffer in bounded time', () => {
+    const frames = Array.from({ length: 10000 }, (_, index) => {
+      const content = Buffer.from('x');
+      const header = Buffer.alloc(8);
+      header[0] = index === 0 ? 1 : index === 9999 ? 9 : 2;
+      header.writeUInt32BE(content.length, 4);
+      return Buffer.concat([header, content]);
+    });
+    const buffer = Buffer.concat(frames);
+    const startedAt = performance.now();
+    const output = demuxDockerLogs(buffer, false);
+    const durationMs = performance.now() - startedAt;
+
+    expect(output).toBe('x'.repeat(9_999));
+    expect(durationMs).toBeLessThan(500);
+  });
+
+  it('returns only complete valid stdout and stderr log frames', () => {
+    const firstPayload = Buffer.from('stdout\n');
+    const secondPayload = Buffer.from('stderr\n');
+    const frame = (stream: number, payload: Buffer) => {
+      const header = Buffer.alloc(8);
+      header[0] = stream;
+      header.writeUInt32BE(payload.length, 4);
+      return Buffer.concat([header, payload]);
+    };
+    const complete = Buffer.concat([frame(1, firstPayload), frame(2, secondPayload)]);
+    const incomplete = Buffer.concat([complete, Buffer.from([1, 0, 0])]);
+
+    expect(demuxDockerLogs(incomplete, false)).toBe('stdout\nstderr\n');
+    expect(demuxDockerLogs(Buffer.from('terminal output'), true)).toBe('terminal output');
+  });
+
+  it('bounds log tail and byte limits before making a socket request', async () => {
+    await expect(
+      containerLogs({ kind: 'unix', socketPath: '/unused.sock' }, containerId, 0),
+    ).rejects.toMatchObject({
+      name: 'DockerApiError',
+      status: 400,
+    });
+    await expect(
+      containerLogs({ kind: 'unix', socketPath: '/unused.sock' }, containerId, 1, 300_000),
+    ).rejects.toMatchObject({
+      name: 'DockerApiError',
+      status: 400,
+    });
+    expect(new DockerApiError(413, 'bounded').status).toBe(413);
   });
 });
 

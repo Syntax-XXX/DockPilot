@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import {
   Activity,
   ArrowRight,
@@ -16,6 +16,7 @@ import {
   LogOut,
   Network,
   Radio,
+  RefreshCw,
   Server,
   Shield,
   ShieldAlert,
@@ -33,6 +34,7 @@ import {
   fetchSetupStatus,
   logIn,
   logOut,
+  fetchSystemStatus,
   ApiError,
 } from '../lib/api.js';
 import { AdminControl, isAdministrator, type AdminSection } from './AdminControl.js';
@@ -42,6 +44,12 @@ type LoadState = 'loading' | 'ready' | 'error';
 type ConsoleSection = 'overview' | AdminSection;
 type ServerStatus = 'checking' | 'online' | 'offline';
 type AuthMode = 'setup' | 'login';
+interface OperationalStatus {
+  database: 'loading' | 'reachable' | 'unavailable';
+  mcpEnabled: boolean | null;
+  activeAiCredentials: number | null;
+  pendingApprovals: number | null;
+}
 
 export default function App() {
   const [user, setUser] = useState<SafeUser | null>(null);
@@ -162,6 +170,15 @@ function StatusDot({ status }: { status: ServerStatus }) {
     <span className={`connection-state connection-state--${status}`}>
       <span className="connection-dot" />
       {label}
+    </span>
+  );
+}
+
+function LiveDot({ label = 'Live' }: { label?: string }) {
+  return (
+    <span className="live-dot-pulse">
+      <span className="live-dot" />
+      <span>{label}</span>
     </span>
   );
 }
@@ -557,7 +574,57 @@ function OperatorConsole({
 }) {
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [section, setSection] = useState<ConsoleSection>('overview');
+  const [operationalStatus, setOperationalStatus] = useState<OperationalStatus>({
+    database: 'loading',
+    mcpEnabled: null,
+    activeAiCredentials: null,
+    pendingApprovals: null,
+  });
+  const [statusRefreshing, setStatusRefreshing] = useState(false);
+  const [lastStatusUpdate, setLastStatusUpdate] = useState<Date | null>(null);
+  const statusRequestInFlight = useRef(false);
+  const operatorMounted = useRef(false);
   const administrator = isAdministrator(user);
+  const showAdministrativeStatus = (content: React.ReactNode) => (administrator ? content : null);
+  const refreshOperationalStatus = useCallback(async () => {
+    if (statusRequestInFlight.current) return;
+    statusRequestInFlight.current = true;
+    if (operatorMounted.current) setStatusRefreshing(true);
+    try {
+      const status = await fetchSystemStatus();
+      if (!operatorMounted.current) return;
+      setOperationalStatus({
+        database: 'reachable',
+        mcpEnabled: status.mcpEnabled,
+        activeAiCredentials: status.counts.activeAiCredentials,
+        pendingApprovals: status.counts.pendingApprovals,
+      });
+      setLastStatusUpdate(new Date());
+    } catch {
+      if (!operatorMounted.current) return;
+      setOperationalStatus({
+        database: 'unavailable',
+        mcpEnabled: null,
+        activeAiCredentials: null,
+        pendingApprovals: null,
+      });
+    } finally {
+      statusRequestInFlight.current = false;
+      if (operatorMounted.current) setStatusRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    operatorMounted.current = true;
+    if (!administrator) return;
+
+    void refreshOperationalStatus();
+    const interval = window.setInterval(() => void refreshOperationalStatus(), 30_000);
+    return () => {
+      operatorMounted.current = false;
+      window.clearInterval(interval);
+    };
+  }, [administrator, refreshOperationalStatus]);
   async function doLogout() {
     setLogoutBusy(true);
     await onLogout();
@@ -569,7 +636,13 @@ function OperatorConsole({
       <aside className="sidebar">
         <header className="sidebar-brand">
           <ProductMark small />
-          <button className="host-selector" aria-label="Host selector: all hosts">
+          <button
+            className="host-selector"
+            type="button"
+            aria-label="Host selector: all hosts"
+            disabled
+            title="Host registration is not available in this milestone"
+          >
             <span className="host-selector-icon">
               <Server size={15} />
             </span>
@@ -633,13 +706,13 @@ function OperatorConsole({
           )}
         </nav>
         <div className="sidebar-bottom">
-          <div className="agent-empty">
+          <div className="agent-empty" role="status">
             <span className="agent-empty-icon">
               <Radio size={15} />
             </span>
             <span>
-              <strong>No agents online</strong>
-              <span>Connect a host to get started</span>
+              <strong>No host agents connected</strong>
+              <span>Agent enrollment is planned for a later milestone.</span>
             </span>
             <span className="agent-connector-dot" />
           </div>
@@ -686,6 +759,37 @@ function OperatorConsole({
           </div>
         </header>
         <div className="dashboard-content">
+          <div className="workspace-context">
+            <span className="workspace-context-mark">
+              <ShipWheel size={15} />
+            </span>
+            <span>
+              <strong>Private workspace</strong>
+              <small>Authenticated as {user.name}</small>
+            </span>
+            <span className="workspace-context-divider" />
+            <span
+              className={`workspace-context-health ${serverStatus === 'offline' || (administrator && operationalStatus.database === 'unavailable') ? 'workspace-context-health--error' : serverStatus === 'checking' || (administrator && operationalStatus.database === 'loading') ? 'workspace-context-health--checking' : 'workspace-context-health--ready'}`}
+              role="status"
+              aria-live="polite"
+            >
+              <LiveDot
+                label={
+                  serverStatus === 'offline'
+                    ? 'API unavailable'
+                    : serverStatus === 'checking'
+                      ? 'Checking API status'
+                      : administrator && operationalStatus.database === 'unavailable'
+                        ? 'API reachable · database unavailable'
+                        : administrator && operationalStatus.database === 'loading'
+                          ? 'Checking database'
+                          : administrator
+                            ? 'System operational'
+                            : 'API reachable'
+                }
+              />
+            </span>
+          </div>
           {globalError && (
             <button className="console-error-banner" onClick={clearGlobalError} role="alert">
               <TriangleAlert size={15} /> {globalError} <span>×</span>
@@ -714,45 +818,68 @@ function OperatorConsole({
                   </h1>
                   <p>Here’s the view from your command center.</p>
                 </div>
-                <button
-                  className="button button--outline"
-                  onClick={() => {
-                    window.location.reload();
-                  }}
-                >
-                  <Activity size={14} /> Refresh overview
-                </button>
+                {showAdministrativeStatus(
+                  <span className="overview-updated">
+                    <span className="live-dot" /> Updating every 30 seconds
+                  </span>,
+                )}
               </section>
-              <div className="stats-grid">
-                <StatCard
-                  icon={Server}
-                  label="CONNECTED HOSTS"
-                  value="—"
-                  sub="Connect an agent to begin"
-                  accent="blue"
-                />
-                <StatCard
-                  icon={Container}
-                  label="RUNNING CONTAINERS"
-                  value="—"
-                  sub="No container data yet"
-                  accent="green"
-                />
-                <StatCard
-                  icon={TriangleAlert}
-                  label="NEEDS ATTENTION"
-                  value="—"
-                  sub="Awaiting host connection"
-                  accent="amber"
-                />
-                <StatCard
-                  icon={ShieldCheck}
-                  label="SECURITY SCORE"
-                  value="—"
-                  sub="Docker Doctor · awaiting data"
-                  accent="purple"
-                />
-              </div>
+              {showAdministrativeStatus(
+                <div className="stats-grid">
+                  <StatCard
+                    icon={Server}
+                    label="ACTIVE AI CREDENTIALS"
+                    value={
+                      operationalStatus.activeAiCredentials === null
+                        ? operationalStatus.database === 'loading'
+                          ? '…'
+                          : '—'
+                        : String(operationalStatus.activeAiCredentials)
+                    }
+                    sub="Active AI credentials"
+                    accent="blue"
+                  />
+                  <StatCard
+                    icon={Container}
+                    label="MCP GATEWAY"
+                    value={
+                      operationalStatus.mcpEnabled === null
+                        ? '—'
+                        : operationalStatus.mcpEnabled
+                          ? 'On'
+                          : 'Off'
+                    }
+                    sub="MCP control layer"
+                    accent="green"
+                  />
+                  <StatCard
+                    icon={TriangleAlert}
+                    label="PENDING APPROVALS"
+                    value={
+                      operationalStatus.pendingApprovals === null
+                        ? operationalStatus.database === 'loading'
+                          ? '…'
+                          : '—'
+                        : String(operationalStatus.pendingApprovals)
+                    }
+                    sub="Human decisions required"
+                    accent="amber"
+                  />
+                  <StatCard
+                    icon={ShieldCheck}
+                    label="DATABASE"
+                    value={
+                      operationalStatus.database === 'reachable'
+                        ? 'Ready'
+                        : operationalStatus.database === 'unavailable'
+                          ? 'Error'
+                          : '…'
+                    }
+                    sub="Database connection"
+                    accent="purple"
+                  />
+                </div>,
+              )}
               <section className="connect-card">
                 <div className="connect-card-left">
                   <div className="connect-label">
@@ -799,8 +926,9 @@ function OperatorConsole({
                   <span className="orbit-satellite" />
                 </div>
               </section>
-              <div className="lower-grid">
-                <section className="panel panel--activity">
+              {showAdministrativeStatus(
+                <div className="lower-grid">
+                  <section className="panel panel--activity">
                   <div className="panel-header">
                     <div>
                       <p className="panel-eyebrow">WHAT’S HAPPENING</p>
@@ -816,60 +944,127 @@ function OperatorConsole({
                     </span>
                     <span>
                       <strong>The log is quiet.</strong>
-                      <span>Host and container events will appear here.</span>
+                      <span>
+                        An administrator can review AI tool calls, decisions, and security events in
+                        the AI activity view.
+                      </span>
                     </span>
                     <span className="empty-line" />
                   </div>
                 </section>
-                <section className="panel panel--health">
-                  <div className="panel-header">
-                    <div>
-                      <p className="panel-eyebrow">SYSTEM STATUS</p>
-                      <h3>System health</h3>
+                  <section
+                    className="panel panel--health"
+                    aria-busy={administrator && statusRefreshing}
+                  >
+                    <div className="panel-header">
+                      <div>
+                        <p className="panel-eyebrow">SYSTEM STATUS</p>
+                        <h3>System health</h3>
+                      </div>
+                      <div className="panel-header-actions">
+                        {showAdministrativeStatus(
+                          <>
+                            <span className="status-updated" aria-live="polite">
+                              {lastStatusUpdate
+                                ? `Updated ${lastStatusUpdate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+                                : 'Waiting for status'}
+                            </span>
+                            <button
+                              className="icon-button status-refresh-button"
+                              type="button"
+                              onClick={() => void refreshOperationalStatus()}
+                              disabled={statusRefreshing}
+                              aria-label="Refresh system status"
+                              title="Refresh system status"
+                            >
+                              <RefreshCw
+                                size={14}
+                                className={statusRefreshing ? 'status-spinning' : ''}
+                              />
+                            </button>
+                          </>,
+                        )}
+                        <span className="panel-icon panel-icon--green">
+                          <ShieldCheck size={16} />
+                        </span>
+                      </div>
                     </div>
-                    <span className="panel-icon panel-icon--green">
-                      <ShieldCheck size={16} />
-                    </span>
-                  </div>
-                  <div className="health-row">
-                    <span className="health-indicator health-indicator--green" />
-                    <span className="health-row-label">DockPilot API</span>
-                    <span className={`health-status health-status--${serverStatus}`}>
-                      {serverStatus === 'online'
-                        ? 'Connected'
-                        : serverStatus === 'offline'
-                          ? 'Disconnected'
-                          : 'Checking'}
-                    </span>
-                    <Check
-                      size={14}
-                      className={`health-check ${serverStatus !== 'online' ? 'health-check--hidden' : ''}`}
-                    />
-                  </div>
-                  <div className="health-row">
-                    <span className="health-indicator health-indicator--blue" />
-                    <span className="health-row-label">Authentication</span>
-                    <span className="health-status health-status--green">Secured</span>
-                    <Fingerprint size={15} className="health-check" />
-                  </div>
-                  <div className="health-row">
-                    <span className="health-indicator health-indicator--amber" />
-                    <span className="health-row-label">Host agents</span>
-                    <span className="health-status health-status--muted">Not connected</span>
-                    <Radio size={14} className="health-check health-check--muted" />
-                  </div>
+                    {showAdministrativeStatus(
+                      operationalStatus.database === 'unavailable' ? (
+                        <SystemStatusNotice retry={() => void refreshOperationalStatus()} />
+                      ) : null,
+                    )}
+                    <div className="health-row">
+                      <span
+                        className={`health-indicator ${serverStatus === 'online' ? 'health-indicator--green' : 'health-indicator--amber'}`}
+                      />
+                      <span className="health-row-label">DockPilot API</span>
+                      <span className={`health-status health-status--${serverStatus}`}>
+                        {serverStatus === 'online'
+                          ? 'Connected'
+                          : serverStatus === 'offline'
+                            ? 'Disconnected'
+                            : 'Checking'}
+                      </span>
+                      <Check
+                        size={14}
+                        className={`health-check ${serverStatus !== 'online' ? 'health-check--hidden' : ''}`}
+                      />
+                    </div>
+                    {showAdministrativeStatus(
+                      <>
+                        <div className="health-row">
+                          <span
+                            className={`health-indicator ${operationalStatus.database === 'reachable' ? 'health-indicator--green' : 'health-indicator--amber'}`}
+                          />
+                          <span className="health-row-label">Database</span>
+                          <span
+                            className={`health-status ${operationalStatus.database === 'reachable' ? 'health-status--green' : 'health-status--muted'}`}
+                          >
+                            {operationalStatus.database === 'reachable'
+                              ? 'Reachable'
+                              : operationalStatus.database === 'unavailable'
+                                ? 'Unavailable'
+                                : 'Checking'}
+                          </span>
+                          <Database size={15} className="health-check" />
+                        </div>
+                        <div className="health-row">
+                          <span
+                            className={`health-indicator ${operationalStatus.mcpEnabled ? 'health-indicator--blue' : 'health-indicator--amber'}`}
+                          />
+                          <span className="health-row-label">MCP gateway</span>
+                          <span className="health-status health-status--muted">
+                            {operationalStatus.mcpEnabled === null
+                              ? 'Unknown'
+                              : operationalStatus.mcpEnabled
+                                ? 'Enabled'
+                                : 'Disabled'}
+                          </span>
+                          <Fingerprint size={15} className="health-check health-check--muted" />
+                        </div>
+                      </>,
+                    )}
+                    <div className="health-row">
+                      <span className="health-indicator health-indicator--amber" />
+                      <span className="health-row-label">Host agents</span>
+                      <span className="health-status health-status--muted">Not implemented</span>
+                      <Radio size={14} className="health-check health-check--muted" />
+                    </div>
                   <div className="health-footer">
                     <ShieldCheck size={13} /> Your account and session are protected.
                   </div>
-                </section>
-              </div>
+                  </section>
+                </div>,
+              )}
               <footer className="dashboard-footer">
                 <span>
                   DOCKPILOT<span className="brand-dot">.</span>{' '}
                   <span className="dashboard-footer-light">DOCKER, WITHOUT THE GUESSING.</span>
                 </span>
                 <span>
-                  <span className="live-dot" /> API{' '}
+                  <span className={`live-dot${serverStatus === 'offline' ? ' live-dot--offline' : ''}`} />{' '}
+                  API{' '}
                   {serverStatus === 'online'
                     ? 'CONNECTED'
                     : serverStatus === 'offline'
@@ -884,6 +1079,18 @@ function OperatorConsole({
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+function SystemStatusNotice({ retry }: { retry: () => void }) {
+  return (
+    <div className="system-status-notice" role="alert">
+      <TriangleAlert size={15} />
+      <span>System status could not be refreshed. Operational values may be unavailable.</span>
+      <button type="button" onClick={retry}>
+        Retry
+      </button>
     </div>
   );
 }

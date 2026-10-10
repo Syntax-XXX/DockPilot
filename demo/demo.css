@@ -12,18 +12,23 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --bg: #090d12;
-  --sidebar: #0d1219;
-  --panel: #111821;
-  --panel2: #151e29;
-  --line: #222e3b;
-  --line2: #2c3a4a;
-  --muted: #8491a2;
-  --dim: #596778;
-  --blue: #62a5ff;
+  --bg: #090c11;
+  --sidebar: #0e1218;
+  --panel: #10151d;
+  --panel2: #131922;
+  --line: #1e2732;
+  --line2: #283443;
+  --muted: #788495;
+  --dim: #566174;
+  --blue: #4d92f6;
   --green: #4ed6a0;
-  --amber: #efb65d;
+  --amber: #f2ad55;
   --red: #ff7d75;
+  --focus: #5d9fff;
+  --focus-ring: 0 0 0 3px rgba(77, 146, 246, 0.18);
+  --surface-soft: #141b24;
+  --surface-hover: #1a2430;
+  --rounded: 9px;
   --mono: 'DM Mono', monospace;
   color-scheme: dark;
 }
@@ -34,7 +39,7 @@ body {
   margin: 0;
   min-width: 350px;
   min-height: 100vh;
-  background: radial-gradient(ellipse at 66% -15%, #18325530, transparent 48%), var(--bg);
+  background: radial-gradient(ellipse at 66% -15%, #18325524, transparent 48%), var(--bg);
 }
 button,
 a {
@@ -43,6 +48,21 @@ a {
 }
 button {
   cursor: pointer;
+}
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+button,
+a,
+input,
+select,
+textarea {
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 a {
   text-decoration: none;
@@ -1141,6 +1161,9 @@ tbody tr:hover {
   }
 }
 @media (max-width: 700px) {
+  .demo-banner {
+    max-width: calc(100vw - 16px);
+  }
   .sidebar {
     position: fixed;
     inset: auto 0 0;
@@ -1277,6 +1300,22 @@ tbody tr:hover {
   }
   .columns {
     gap: 9px;
+  }
+}
+@media (max-width: 430px) {
+  .demo-banner {
+    gap: 6px;
+    padding: 8px 9px;
+  }
+  .demo-banner > span:nth-of-type(2) {
+    display: none;
+  }
+  .demo-banner button:not(.banner-close) {
+    padding: 4px 6px;
+    font-size: 8px;
+  }
+  .top-actions .demo-status {
+    letter-spacing: 0.2px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

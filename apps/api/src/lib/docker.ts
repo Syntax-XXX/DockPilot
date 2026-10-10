@@ -334,14 +334,21 @@ export async function containerLogs(
   containerId: string,
   tailLines = 100,
   maxBytes = DOCKER_MAX_LOG_BYTES,
+  requestTimeoutMs = DOCKER_REQUEST_TIMEOUT_MS,
 ): Promise<string> {
   if (!/^[a-f0-9]{64}$/u.test(containerId)) {
     throw new DockerApiError(400, 'Invalid container ID format.');
   }
-  const rawBuffer = await fetchContainerLogsRaw(endpoint, containerId, tailLines, maxBytes);
+  const rawBuffer = await fetchContainerLogsRaw(
+    endpoint,
+    containerId,
+    tailLines,
+    maxBytes,
+    requestTimeoutMs,
+  );
   const inspect = await inspectContainer(endpoint, containerId);
   const isTty = inspect.Config.Tty;
-  return demuxLogBuffer(rawBuffer, isTty);
+  return demuxDockerLogs(rawBuffer, isTty);
 }
 
 async function fetchContainerLogsRaw(
@@ -349,11 +356,24 @@ async function fetchContainerLogsRaw(
   containerId: string,
   tailLines: number,
   maxBytes: number,
+  requestTimeoutMs: number,
 ): Promise<Buffer> {
-  const controller = new AbortController();
+  if (!Number.isSafeInteger(tailLines) || tailLines < 1 || tailLines > 1000) {
+    throw new DockerApiError(400, 'Container log tail must be between 1 and 1000 lines.');
+  }
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > DOCKER_MAX_LOG_BYTES) {
+    throw new DockerApiError(400, 'Container log size limit is invalid.');
+  }
+  if (
+    !Number.isSafeInteger(requestTimeoutMs) ||
+    requestTimeoutMs < 1 ||
+    requestTimeoutMs > DOCKER_REQUEST_TIMEOUT_MS
+  ) {
+    throw new DockerApiError(400, 'Container log timeout is invalid.');
+  }
   const chunks: Buffer[] = [];
   let totalBytes = 0;
-
+  let settled = false;
   const params = new URLSearchParams({
     stdout: '1',
     stderr: '1',
@@ -365,77 +385,108 @@ async function fetchContainerLogsRaw(
     method: 'GET',
     path: `/containers/${containerId}/logs?${params.toString()}`,
     headers: { Accept: 'application/json' },
-    timeout: DOCKER_REQUEST_TIMEOUT_MS,
-    signal: controller.signal,
+    signal: AbortSignal.timeout(requestTimeoutMs),
   };
 
-  const req = http.request(options, (res) => {
-    res.on('data', (chunk: Buffer) => {
-      totalBytes += chunk.length;
-      if (totalBytes > maxBytes) {
-        req.destroy();
-        controller.abort();
-        throw new DockerApiError(500, 'Container logs exceed maximum allowed size.');
+  return await new Promise<Buffer>((resolve, reject) => {
+    const finish = (error?: Error, buffer?: Buffer) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else resolve(buffer ?? Buffer.alloc(0));
+    };
+    const req = http.request(options, (res) => {
+      if ((res.statusCode ?? 500) >= 400) {
+        res.resume();
+        finish(new DockerApiError(res.statusCode ?? 500, 'Unable to retrieve container logs.'));
+        return;
       }
-      chunks.push(chunk);
+
+      res.on('data', (chunk: Buffer) => {
+        if (settled) return;
+        totalBytes += chunk.length;
+        if (totalBytes > maxBytes) {
+          const error = new DockerApiError(413, 'Container logs exceed the allowed size.');
+          finish(error);
+          res.destroy(error);
+          req.destroy(error);
+          return;
+        }
+        chunks.push(chunk);
+      });
+      res.on('aborted', () => {
+        finish(new DockerConnectionError('Docker log response ended before the stream completed.'));
+      });
+      res.on('close', () => {
+        if (!res.complete) {
+          finish(
+            new DockerConnectionError('Docker log response ended before the stream completed.'),
+          );
+        }
+      });
+      res.on('end', () => {
+        if (!settled) finish(undefined, Buffer.concat(chunks));
+      });
+      res.on('error', (error) => {
+        finish(
+          new DockerConnectionError(
+            'Docker log response failed before the stream completed.',
+            error,
+          ),
+        );
+      });
     });
 
-    res.on('end', () => {
-      // Response complete
+    req.setTimeout(requestTimeoutMs, () => {
+      const error = new DockerConnectionError('Docker log request timed out.');
+      finish(error);
+      req.destroy(error);
     });
-    res.on('error', () => {
-      req.destroy();
-      controller.abort();
+    req.on('error', (error) => {
+      finish(
+        new DockerConnectionError(
+          'Docker log request failed before the response completed.',
+          error,
+        ),
+      );
     });
+    req.end();
   });
-
-  req.on('error', () => {
-    req.destroy();
-    controller.abort();
-  });
-
-  req.end();
-
-  await new Promise<void>((resolve, reject) => {
-    const finishHandler = () => {
-      resolve();
-    };
-    const errorHandler = (err: Error) => {
-      reject(err);
-    };
-
-    req.once('response', finishHandler);
-    req.once('error', errorHandler);
-  });
-
-  return Buffer.concat(chunks);
 }
 
-function demuxLogBuffer(buffer: Buffer, isTty: boolean): string {
+export function demuxDockerLogs(buffer: Buffer, isTty: boolean): string {
   if (isTty) {
     return buffer.toString('utf8');
   }
 
   let offset = 0;
-  let output = '';
+  let outputBytes = 0;
+  let outputLines = 1;
   const maxFrames = 10000;
+  const chunks: string[] = [];
 
   while (
     offset + 8 <= buffer.length &&
-    output.length < DOCKER_MAX_LOG_BYTES &&
-    output.split('\n').length < maxFrames
+    outputBytes < DOCKER_MAX_LOG_BYTES &&
+    outputLines < maxFrames
   ) {
     const size = buffer.readUInt32BE(offset + 4);
+    const streamType = buffer[offset];
     offset += 8;
 
     if (offset + size > buffer.length) break;
 
-    const chunk = buffer.toString('utf8', offset, offset + size);
-    output += chunk;
+    if (streamType === 1 || streamType === 2) {
+      const remainingBytes = DOCKER_MAX_LOG_BYTES - outputBytes;
+      const chunk = buffer.toString('utf8', offset, offset + Math.min(size, remainingBytes));
+      chunks.push(chunk);
+      outputBytes += Buffer.byteLength(chunk, 'utf8');
+      outputLines += (chunk.match(/\n/gu) ?? []).length;
+    }
     offset += size;
   }
 
-  return output;
+  return chunks.join('');
 }
 
 export async function startContainer(endpoint: DockerEndpoint, containerId: string): Promise<void> {
@@ -504,8 +555,7 @@ export async function removeContainer(
 
 export function socketExists(socketPath: string): boolean {
   try {
-    const stat = fs.statSync(socketPath);
-    return stat.isFile();
+    return fs.statSync(socketPath).isSocket();
   } catch {
     return false;
   }
