@@ -158,6 +158,13 @@ describe('host and container REST surface', () => {
       );
     }
 
+    // The engine's state is authoritative: the response must reflect the state that the
+    // action left behind (stop => exited), not the state captured at the last sync.
+    const stopped = await adminSend('POST', `/containers/${containerId}/stop`, ownerCookie);
+    expect(stopped.json<{ container: { state: string } }>().container.state).toBe('exited');
+    const restarted = await adminSend('POST', `/containers/${containerId}/restart`, ownerCookie);
+    expect(restarted.json<{ container: { state: string } }>().container.state).toBe('running');
+
     const actions = await auditActions();
     expect(actions).toContain('host.created');
     expect(actions).toContain('host.synced');
@@ -447,6 +454,145 @@ describe('Docker MCP tools', () => {
     expect(unknown.isError).toBe(true);
     expect(unknown.text).toContain('not_found');
     expect(await client`SELECT count(*)::int AS total FROM ai_approvals`).toEqual([{ total: 0 }]);
+  }, 30_000);
+});
+
+describe('Docker insights surface', () => {
+  it('reports organization-scoped summary counts', async () => {
+    const hostId = await registerHost(ownerCookie);
+    await syncHost(ownerCookie, hostId);
+
+    const summary = await adminGet('/docker-summary', ownerCookie);
+    expect(summary.statusCode).toBe(200);
+    const body = summary.json<{
+      summary: {
+        hosts: number;
+        healthyHosts: number;
+        containers: number;
+        runningContainers: number;
+        stoppedContainers: number;
+      };
+    }>().summary;
+    expect(body.hosts).toBe(1);
+    expect(body.healthyHosts).toBe(1);
+    expect(body.containers).toBe(1);
+    expect(body.runningContainers).toBe(1);
+    expect(body.stoppedContainers).toBe(0);
+  }, 30_000);
+
+  it('samples container stats for a synced container', async () => {
+    const hostId = await registerHost(ownerCookie);
+    await syncHost(ownerCookie, hostId);
+
+    const response = await adminGet(`/containers/${containerId}/stats`, ownerCookie);
+    expect(response.statusCode).toBe(200);
+    const stats = response.json<{
+      stats: { cpuPercent: number; memoryUsedBytes: number; networkRxBytes: number; pids: number };
+    }>().stats;
+    expect(stats.cpuPercent).toBeGreaterThan(0);
+    expect(stats.memoryUsedBytes).toBe(100_000_000);
+    expect(stats.networkRxBytes).toBe(1000);
+    expect(stats.pids).toBe(7);
+  }, 30_000);
+
+  it('runs read-only host diagnostics and records an audit event', async () => {
+    const hostId = await registerHost(ownerCookie);
+
+    const response = await adminGet(`/hosts/${hostId}/diagnostics`, ownerCookie);
+    expect(response.statusCode).toBe(200);
+    const diagnostics = response.json<{
+      diagnostics: { overall: string; checks: { id: string; severity: string }[] };
+    }>().diagnostics;
+    expect(diagnostics.overall).toBe('ok');
+    expect(diagnostics.checks.map((check) => check.id)).toContain('engine_reachable');
+    expect(await auditActions()).toContain('host.diagnosed');
+  }, 30_000);
+
+  it('lists host images and routes image removal through approval', async () => {
+    const hostId = await registerHost(ownerCookie);
+    const imageId = `sha256:${'a'.repeat(64)}`;
+
+    const listing = await adminGet(`/hosts/${hostId}/images`, ownerCookie);
+    expect(listing.statusCode).toBe(200);
+    const images = listing.json<{
+      images: { id: string; repoTags: string[]; sizeBytes: number }[];
+    }>().images;
+    expect(images).toHaveLength(1);
+    expect(images[0]?.id).toBe(imageId);
+    expect(images[0]?.repoTags).toContain('nginx:alpine');
+    expect(images[0]?.sizeBytes).toBe(23_000_000);
+
+    const request = await adminSend('DELETE', `/hosts/${hostId}/images`, ownerCookie, {
+      imageId,
+      justification: 'Reclaim unused image',
+    });
+    expect(request.statusCode).toBe(202);
+    expect(fixture.removedImages).toHaveLength(0);
+
+    const approvalId = request.json<{ approval: { id: string } }>().approval.id;
+    const decision = await adminSend('POST', `/approvals/${approvalId}/decision`, ownerCookie, {
+      decision: 'approve',
+    });
+    expect(decision.statusCode).toBe(200);
+    expect(fixture.removedImages).toEqual([imageId]);
+    expect(await auditActions()).toContain('image.removed');
+  }, 30_000);
+
+  it('exposes stats, diagnostics, images and summary through MCP tools', async () => {
+    const hostId = await registerHost(ownerCookie);
+    await syncHost(ownerCookie, hostId);
+
+    const reader = await createCredential(app, ownerCookie, {
+      name: 'insights-reader',
+      permissionLevel: 'read',
+    });
+    const mcpClient = await connect(reader.token);
+
+    const stats = await callTool(mcpClient, 'dockpilot_get_container_stats', { containerId });
+    expect(stats.isError).toBe(false);
+    expect(stats.structuredContent?.stats !== undefined).toBe(true);
+
+    const diagnostics = await callTool(mcpClient, 'dockpilot_run_host_diagnostics', { hostId });
+    expect(diagnostics.isError).toBe(false);
+    expect(asRecord(diagnostics.structuredContent?.diagnostics)?.overall).toBe('ok');
+
+    const images = await callTool(mcpClient, 'dockpilot_list_images', { hostId });
+    expect(images.isError).toBe(false);
+    expect(asArray(images.structuredContent?.images)).toHaveLength(1);
+
+    const summary = await callTool(mcpClient, 'dockpilot_docker_summary', {});
+    expect(summary.isError).toBe(false);
+    expect(summary.structuredContent?.hosts).toBe(1);
+    expect(summary.structuredContent?.containers).toBe(1);
+
+    const denied = await callTool(mcpClient, 'dockpilot_request_image_removal', {
+      hostId,
+      imageId: `sha256:${'a'.repeat(64)}`,
+      justification: 'Reclaim an image',
+    });
+    expect(denied.isError).toBe(true);
+    expect(denied.text).toContain('authorization');
+  }, 30_000);
+
+  it('creates a pending approval for an image removal request via MCP', async () => {
+    const hostId = await registerHost(ownerCookie);
+    const imageId = `sha256:${'a'.repeat(64)}`;
+
+    const destructor = await createCredential(app, ownerCookie, {
+      name: 'insights-destructor',
+      permissionLevel: 'destructive',
+    });
+    const mcpClient = await connect(destructor.token);
+
+    const request = await callTool(mcpClient, 'dockpilot_request_image_removal', {
+      hostId,
+      imageId,
+      justification: 'Reclaim an image',
+    });
+    expect(request.isError).toBe(false);
+    expect(request.structuredContent?.approvalRequired).toBe(true);
+    expect(request.structuredContent?.targetType).toBe('image');
+    expect(fixture.removedImages).toHaveLength(0);
   }, 30_000);
 });
 

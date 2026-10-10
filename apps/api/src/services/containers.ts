@@ -7,7 +7,10 @@ import {
   stopContainer as dockerStopContainer,
   restartContainer as dockerRestartContainer,
   removeContainer as dockerRemoveContainer,
+  inspectContainer as dockerInspectContainer,
   containerLogs,
+  type DockerEndpoint,
+  type ContainerInspect,
 } from '../lib/docker.js';
 import { keysetAfter } from '../lib/keyset.js';
 import { decodeCursor, encodeCursor } from '../lib/pagination.js';
@@ -136,7 +139,7 @@ export async function containerLog(input: ContainerLogInput): Promise<ContainerL
 async function resolveHostEndpoint(
   input: { organizationId: string; containerId: string; executor?: DbExecutor },
   executor: DbExecutor,
-): Promise<{ container: ContainerView; endpoint: ReturnType<typeof parseDockerEndpoint> }> {
+): Promise<{ container: ContainerView; endpoint: DockerEndpoint }> {
   const container = await getContainer({ ...input, executor });
   const host = await getOperableHost({
     organizationId: input.organizationId,
@@ -144,6 +147,60 @@ async function resolveHostEndpoint(
     executor,
   });
   return { container, endpoint: parseDockerEndpoint(host.endpoint) };
+}
+
+function formatDockerStatus(inspect: ContainerInspect): string {
+  const state = inspect.State;
+  if (state.Running) {
+    return state.Health?.Status ? `Up (${state.Health.Status})` : 'Up';
+  }
+  const finishedAt = state.FinishedAt;
+  const when = finishedAt && !finishedAt.startsWith('0001') ? ` (since ${finishedAt})` : '';
+  return `Exited (${String(state.ExitCode ?? 0)})${when}`;
+}
+
+// The stored enum has no 'unknown' member, and the engine reports only a handful of
+// values, so normalize anything unexpected to a state the row can actually hold.
+const PERSISTED_STATES = [
+  'created',
+  'running',
+  'paused',
+  'restarting',
+  'removing',
+  'exited',
+  'dead',
+] as const;
+type PersistedState = (typeof PERSISTED_STATES)[number];
+
+function toPersistedState(status: string): PersistedState {
+  return (PERSISTED_STATES as readonly string[]).includes(status)
+    ? (status as PersistedState)
+    : 'exited';
+}
+
+// The engine's state is authoritative: after a lifecycle action, persist what Docker
+// reports so the stored row (and the immediate API/UI response) reflect the real state
+// instead of the state captured at the last sync.
+async function refreshContainerState(
+  input: { organizationId: string; containerId: string },
+  container: ContainerView,
+  endpoint: DockerEndpoint,
+  executor: DbExecutor,
+): Promise<ContainerView> {
+  const inspect = await dockerInspectContainer(endpoint, container.containerId);
+  const state = toPersistedState(inspect.State.Status);
+  const status = formatDockerStatus(inspect);
+  const syncedAt = new Date();
+  await executor
+    .update(containersTable)
+    .set({ state, status, syncedAt })
+    .where(
+      and(
+        eq(containersTable.id, container.id),
+        eq(containersTable.organizationId, input.organizationId),
+      ),
+    );
+  return { ...container, state, status, syncedAt: syncedAt.toISOString() };
 }
 
 export async function startContainer(input: {
@@ -154,7 +211,7 @@ export async function startContainer(input: {
   const executor = input.executor ?? db;
   const { container, endpoint } = await resolveHostEndpoint(input, executor);
   await dockerStartContainer(endpoint, container.containerId);
-  return await getContainer({ ...input, executor });
+  return await refreshContainerState(input, container, endpoint, executor);
 }
 
 export async function stopContainer(input: {
@@ -165,7 +222,7 @@ export async function stopContainer(input: {
   const executor = input.executor ?? db;
   const { container, endpoint } = await resolveHostEndpoint(input, executor);
   await dockerStopContainer(endpoint, container.containerId);
-  return await getContainer({ ...input, executor });
+  return await refreshContainerState(input, container, endpoint, executor);
 }
 
 export async function restartContainer(input: {
@@ -176,7 +233,7 @@ export async function restartContainer(input: {
   const executor = input.executor ?? db;
   const { container, endpoint } = await resolveHostEndpoint(input, executor);
   await dockerRestartContainer(endpoint, container.containerId);
-  return await getContainer({ ...input, executor });
+  return await refreshContainerState(input, container, endpoint, executor);
 }
 
 export async function removeContainer(input: {

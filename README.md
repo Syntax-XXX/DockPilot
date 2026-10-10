@@ -15,16 +15,18 @@ DockPilot is a web dashboard, a typed API, and an MCP control layer for external
 - Revocable server-side sessions.
 - A relational PostgreSQL schema with organization scoping, sessions, audit logs, AI credentials, and approval records.
 - A secure MCP control layer so an external AI agent can inspect DockPilot and request narrowly scoped changes, with human approval required for destructive work.
+- A Docker vertical slice: register a Docker host over an allowlisted socket, sync and browse its containers, read logs, sample live CPU/memory/network stats, and start, stop, or restart containers. Host images can be browsed and dangling images flagged, and a read-only Docker Doctor runs connectivity, stopped-container, and storage checks against a host.
 - Admin-visible AI credential management, AI activity logs, and an approval inbox.
 - Rate limiting, input validation, correlation IDs, and append-only audit logging.
+- A themed `install.sh` that verifies prerequisites, generates secrets, starts local PostgreSQL, migrates, and starts the stack.
 - Automated unit and integration tests, including adversarial MCP security tests.
 
 ## What does not work yet
 
-- Docker hosts are not connected. There are no agents, containers, images, volumes, networks, container logs, or Docker Doctor diagnostics.
-- Agent enrollment, container operations, metrics, backup/restore, notifications, update execution, integrations, and automation are future work. They are not implemented and are not presented as working features.
-- The MCP tools operate on DockPilot's own data only. There is no shell execution tool, no arbitrary SQL tool, no Docker socket access, and no generic "execute anything" tool.
-- Only two destructive actions can be approved and executed today: session revocation and AI credential revocation.
+- Only Docker **hosts** registered over unix sockets are supported. There is no remote agent enrollment, no TLS-secured remote Docker endpoint, and no multi-host scheduling.
+- Volumes, networks, image pulls/builds, exec into containers, backup/restore, notifications, update execution, integrations, and automation are future work. They are not implemented and are not presented as working features.
+- The MCP tools operate on Docker hosts and DockPilot's own data. There is no shell execution tool, no arbitrary SQL tool, and no generic "execute anything" tool. Container removal, host removal, and image removal are never executed directly by an agent — they only create approvals.
+- Destructive actions that can be approved and executed today: session revocation, AI credential revocation, container removal, host removal, and image removal.
 - DockPilot still provisions a single organization with a single initial owner. Multi-tenant administration and finer-grained roles are not implemented.
 - Audit retention is manual. There is no automatic pruning or archival.
 - Password recovery is not implemented.
@@ -36,6 +38,18 @@ DockPilot is a web dashboard, a typed API, and an MCP control layer for external
 - No globally installed PostgreSQL required for local development. A loopback-only PostgreSQL instance runs in Compose.
 
 ## Quick start
+
+The fastest path is the installer. It checks your toolchain, generates secrets, starts the local
+PostgreSQL container, applies migrations, and offers to start the dev servers:
+
+```sh
+./install.sh
+```
+
+Add `--yes` for a non-interactive run, `--no-start` to install without launching servers, or
+`--prod` to build production bundles. Use `./install.sh --help` for all options.
+
+Prefer to do it by hand? The rest of this section is the equivalent manual flow.
 
 ```sh
 npm install
@@ -142,8 +156,23 @@ Permissions are ordered `read`, `write`, `destructive` from least to most privil
 - `dockpilot_get_audit_event` — **read**. Returns a single redacted audit event.
 - `dockpilot_list_approvals` — **read**. Lists approval requests, optionally filtered by status.
 - `dockpilot_update_my_credential` — **write**. Updates only the calling credential's description, agent identity, and metadata.
+- `dockpilot_list_hosts` — **read**. Lists registered Docker hosts with bounded, keyset-paginated pages.
+- `dockpilot_get_host` — **read**. Returns a single registered Docker host.
+- `dockpilot_list_containers` — **read**. Lists synced containers for a host.
+- `dockpilot_get_container_logs` — **read**. Returns a bounded tail of a container's logs.
+- `dockpilot_get_container_stats` — **read**. Returns one CPU, memory, network, and block I/O sample for a container.
+- `dockpilot_list_images` — **read**. Lists the images present on a host.
+- `dockpilot_run_host_diagnostics` — **read**. Runs read-only Docker Doctor checks against a host.
+- `dockpilot_docker_summary` — **read**. Returns organization-scoped host and container counts.
+- `dockpilot_create_host` — **write**. Registers a Docker host over an allowlisted socket.
+- `dockpilot_update_host` — **write**. Updates a host's name, description, labels, metadata, or endpoint.
+- `dockpilot_sync_host_containers` — **write**. Re-syncs a host's container inventory.
+- `dockpilot_set_container_state` — **write**. Starts, stops, or restarts a container.
 - `dockpilot_request_session_revocation` — **destructive**. Creates a pending approval to revoke a browser session. Requires a written justification.
 - `dockpilot_request_credential_revocation` — **destructive**. Creates a pending approval to revoke an AI credential. Requires a written justification.
+- `dockpilot_request_container_removal` — **destructive**. Creates a pending approval to remove a container. Requires a written justification.
+- `dockpilot_request_host_removal` — **destructive**. Creates a pending approval to remove a Docker host. Requires a written justification.
+- `dockpilot_request_image_removal` — **destructive**. Creates a pending approval to remove an image from a host. Requires a written justification.
 
 Tool metadata lives in one place, `packages/shared/src/mcp.ts`, so the shared contract and the API tool registry cannot disagree about permission level, rate category, or action name. Every tool advertises a strict JSON Schema with `additionalProperties: false`, and inputs are re-validated strictly on the server before any handler runs.
 
@@ -161,9 +190,9 @@ Authentication attempts are limited separately to 20 per minute per client addre
 
 ### Human approval for destructive work
 
-The two destructive tools never perform the action they describe. They create a pending approval request that records the requesting credential, agent identity, tool, action type, target, and justification, and expires one hour after creation. An administrator then approves or rejects it.
+The destructive tools never perform the action they describe. They create a pending approval request that records the requesting credential, agent identity, tool, action type, target, and justification, and expires one hour after creation. An administrator then approves or rejects it.
 
-Only on approval does DockPilot execute the action, inside a single database transaction that locks the approval row and writes the execution audit event. Rejected, expired, and already-decided requests cannot execute anything. Approving a request whose target has disappeared results in a recorded `failed` approval instead of a silent success. The executable action types are currently `session.revoke` and `ai_credential.revoke`. Any other action type is refused.
+Only on approval does DockPilot execute the action, inside a single database transaction that locks the approval row and writes the execution audit event. Rejected, expired, and already-decided requests cannot execute anything. Approving a request whose target has disappeared results in a recorded `failed` approval instead of a silent success. The executable action types are currently `session.revoke`, `ai_credential.revoke`, `container.remove`, `host.remove`, and `image.remove`. Any other action type is refused.
 
 Read-only tools never require approval.
 
@@ -187,6 +216,16 @@ Administrator-only REST routes, for roles `owner` and `admin`, live under `/api/
 - `POST /ai-credentials/:id/revoke`
 - `GET /audit-events` and `GET /audit-events/:id`
 - `GET /approvals` and `POST /approvals/:id/decision`
+- `GET /hosts` and `POST /hosts` — register and list Docker hosts.
+- `GET /hosts/:id`, `PATCH /hosts/:id`, and `DELETE /hosts/:id` — read, update, or request removal through approval.
+- `POST /hosts/:id/sync` — re-sync the host's containers.
+- `GET /hosts/:id/containers` — list synced containers.
+- `GET /hosts/:id/images` and `DELETE /hosts/:id/images` — list images, or request an image removal through approval.
+- `GET /hosts/:id/diagnostics` — run read-only Docker Doctor checks.
+- `GET /containers/:containerId/logs` — read a bounded log tail.
+- `GET /containers/:containerId/stats` — one live stats sample.
+- `POST /containers/:containerId/:action` — start, stop, or restart; `DELETE /containers/:containerId` requests removal through approval.
+- `GET /docker-summary` — organization-scoped host and container counts.
 
 The create credential response is the only place a token is ever returned.
 

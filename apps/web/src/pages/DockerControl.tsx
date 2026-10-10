@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode, type SyntheticEvent } from 'react';
 import {
+  Activity,
   Boxes,
+  HardDrive,
   Loader2,
   Play,
   RefreshCw,
@@ -12,25 +14,36 @@ import {
   TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
-import type { ContainerView, HostView, SafeUser } from '@dockpilot/shared';
+import type {
+  ContainerStats,
+  ContainerView,
+  HostDiagnostics,
+  HostView,
+  ImageView,
+  SafeUser,
+} from '@dockpilot/shared';
 import {
   ApiError,
   createHost,
   disableHost,
   enableHost,
   fetchContainerLogs,
+  fetchContainerStats,
   fetchContainers,
   fetchHosts,
+  fetchImages,
   refreshHost,
   requestContainerRemoval,
   requestHostRemoval,
+  requestImageRemoval,
   restartContainer,
+  runHostDiagnostics,
   startContainer,
   stopContainer,
   syncHost,
 } from '../lib/api.js';
 
-export type DockerSection = 'hosts' | 'containers';
+export type DockerSection = 'hosts' | 'containers' | 'images' | 'doctor';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -75,6 +88,15 @@ export function DockerControl({
           }}
           notify={notify}
         />
+      ) : section === 'images' ? (
+        <ImagesPanel
+          user={user}
+          selectedHostId={selectedHostId}
+          onSelectHost={onSelectHost}
+          notify={notify}
+        />
+      ) : section === 'doctor' ? (
+        <DoctorPanel selectedHostId={selectedHostId} onSelectHost={onSelectHost} />
       ) : (
         <ContainersPanel
           user={user}
@@ -467,6 +489,9 @@ function ContainersPanel({
   const [logContainer, setLogContainer] = useState<ContainerView | null>(null);
   const [logText, setLogText] = useState<string | null>(null);
   const [logLoading, setLogLoading] = useState(false);
+  const [statsContainer, setStatsContainer] = useState<ContainerView | null>(null);
+  const [stats, setStats] = useState<ContainerStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
   const canOperate = isOperator(user);
   const canRemove = isManager(user);
 
@@ -527,6 +552,20 @@ function ContainersPanel({
       setLogText(`Unable to load logs: ${errorMessage(caught)}`);
     } finally {
       setLogLoading(false);
+    }
+  }
+
+  async function openStats(container: ContainerView) {
+    setStatsContainer(container);
+    setStats(null);
+    setStatsLoading(true);
+    try {
+      setStats(await fetchContainerStats(container.containerId));
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setStatsContainer(null);
+    } finally {
+      setStatsLoading(false);
     }
   }
 
@@ -632,6 +671,13 @@ function ContainersPanel({
                         >
                           Logs
                         </button>
+                        <button
+                          type="button"
+                          className="button button--outline button--compact"
+                          onClick={() => void openStats(container)}
+                        >
+                          <Activity size={13} /> Stats
+                        </button>
                         {canOperate && (
                           <>
                             <button
@@ -697,6 +743,42 @@ function ContainersPanel({
           </div>
         )
       )}
+      {statsContainer !== null && (
+        <div className="log-panel">
+          <div className="log-panel-header">
+            <strong>{statsContainer.name ?? statsContainer.containerId} — live stats</strong>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => {
+                setStatsContainer(null);
+                setStats(null);
+              }}
+            >
+              Close
+            </button>
+          </div>
+          {statsLoading ? (
+            <div className="admin-loading" aria-busy="true">
+              <Loader2 size={15} className="admin-spin" /> Sampling stats
+            </div>
+          ) : stats !== null ? (
+            <div className="stat-grid">
+              <StatPill label="CPU" value={`${stats.cpuPercent.toFixed(2)}%`} />
+              <StatPill
+                label="Memory"
+                value={`${formatBytes(stats.memoryUsedBytes)} / ${formatBytes(stats.memoryLimitBytes)}`}
+              />
+              <StatPill label="Memory %" value={`${stats.memoryPercent.toFixed(2)}%`} />
+              <StatPill
+                label="Network"
+                value={`rx ${formatBytes(stats.networkRxBytes)} · tx ${formatBytes(stats.networkTxBytes)}`}
+              />
+              <StatPill label="PIDs" value={String(stats.pids)} />
+            </div>
+          ) : null}
+        </div>
+      )}
       {logContainer !== null && (
         <div className="log-panel">
           <div className="log-panel-header">
@@ -720,6 +802,347 @@ function ContainersPanel({
             <pre className="log-view">{logText}</pre>
           )}
         </div>
+      )}
+    </>
+  );
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  const suffix = units.at(unit) ?? 'B';
+  return `${size.toFixed(unit === 0 ? 0 : 1)} ${suffix}`;
+}
+
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat-pill">
+      <span className="stat-pill-label">{label}</span>
+      <strong className="stat-pill-value">{value}</strong>
+    </div>
+  );
+}
+
+function severityChip(severity: HostDiagnostics['overall']): string {
+  if (severity === 'critical') return 'state-chip state-chip--red';
+  if (severity === 'warning') return 'state-chip state-chip--amber';
+  if (severity === 'info') return 'state-chip state-chip--blue';
+  return 'state-chip state-chip--green';
+}
+
+function ImagesPanel({
+  user,
+  selectedHostId,
+  onSelectHost,
+  notify,
+}: {
+  user: SafeUser;
+  selectedHostId: string | null;
+  onSelectHost: (hostId: string | null) => void;
+  notify: (message: string) => void;
+}) {
+  const [hosts, setHosts] = useState<HostView[]>([]);
+  const [images, setImages] = useState<ImageView[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string | null>(null);
+  const [danglingOnly, setDanglingOnly] = useState(false);
+  const canRemove = isManager(user);
+
+  const load = useCallback(async () => {
+    setState('loading');
+    setError(null);
+    try {
+      const page = await fetchHosts();
+      setHosts(page.hosts);
+      const target = selectedHostId ?? page.hosts[0]?.id ?? null;
+      if (target !== null && target !== selectedHostId) onSelectHost(target);
+      if (target === null) {
+        setImages([]);
+      } else {
+        const imagePage = await fetchImages(target);
+        setImages(imagePage.images);
+      }
+      setState('ready');
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setState('error');
+    }
+  }, [selectedHostId, onSelectHost]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function requestRemoval(image: ImageView) {
+    if (selectedHostId === null) return;
+    const label = image.repoTags[0] ?? image.id.slice(0, 19);
+    const justification = window.prompt(
+      `Requesting removal of image "${label}". Provide a justification:`,
+    );
+    if (justification === null || justification.trim().length < 4) return;
+    setError(null);
+    try {
+      await requestImageRemoval(selectedHostId, image.id, justification.trim());
+      notify('Image removal request submitted for administrator approval.');
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  const visible = danglingOnly ? images.filter((image) => image.dangling) : images;
+
+  return (
+    <>
+      <PanelHeading
+        eyebrow="RESOURCES"
+        title="Images"
+        description="Browse the images stored on a host. Removing an image requires administrator approval."
+        icon={HardDrive}
+        actions={
+          <select
+            className="admin-select"
+            value={selectedHostId ?? ''}
+            onChange={(event) => {
+              onSelectHost(event.target.value === '' ? null : event.target.value);
+            }}
+            aria-label="Select host"
+          >
+            {hosts.length === 0 && <option value="">No hosts</option>}
+            {hosts.map((host) => (
+              <option key={host.id} value={host.id}>
+                {host.name}
+              </option>
+            ))}
+          </select>
+        }
+      />
+      {error !== null && <PanelNotice tone="error">{error}</PanelNotice>}
+      {hosts.length === 0 && state === 'ready' ? (
+        <div className="quiet-empty">
+          <span className="quiet-empty-icon">
+            <Server size={17} />
+          </span>
+          <span>
+            <strong>No Docker hosts registered.</strong>
+            <span>Register a host on the Hosts screen first.</span>
+          </span>
+          <span className="empty-line" />
+        </div>
+      ) : state === 'loading' ? (
+        <div className="admin-loading" aria-busy="true">
+          <Loader2 size={15} className="admin-spin" /> Loading images
+        </div>
+      ) : (
+        <>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={danglingOnly}
+              onChange={(event) => {
+                setDanglingOnly(event.target.checked);
+              }}
+            />
+            Show only dangling images
+          </label>
+          {visible.length === 0 ? (
+            <div className="quiet-empty">
+              <span className="quiet-empty-icon">
+                <HardDrive size={17} />
+              </span>
+              <span>
+                <strong>No images found.</strong>
+                <span>This host has no images, or none match the filter.</span>
+              </span>
+              <span className="empty-line" />
+            </div>
+          ) : (
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Tag</th>
+                    <th>Image ID</th>
+                    <th>Size</th>
+                    <th>Used by</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((image) => (
+                    <tr key={image.id}>
+                      <td>
+                        <strong>{image.repoTags[0] ?? '<none>'}</strong>
+                        {image.dangling && (
+                          <span className="admin-cell-detail admin-cell-detail--error">
+                            Dangling
+                          </span>
+                        )}
+                      </td>
+                      <td className="admin-mono">{image.id.replace('sha256:', '').slice(0, 12)}</td>
+                      <td>{formatBytes(image.sizeBytes)}</td>
+                      <td>
+                        {image.containerCount} container{image.containerCount === 1 ? '' : 's'}
+                      </td>
+                      <td>
+                        {canRemove && (
+                          <button
+                            type="button"
+                            className="button button--danger button--compact"
+                            onClick={() => void requestRemoval(image)}
+                          >
+                            <Trash2 size={13} /> Remove
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function DoctorPanel({
+  selectedHostId,
+  onSelectHost,
+}: {
+  selectedHostId: string | null;
+  onSelectHost: (hostId: string | null) => void;
+}) {
+  const [hosts, setHosts] = useState<HostView[]>([]);
+  const [report, setReport] = useState<HostDiagnostics | null>(null);
+  const [state, setState] = useState<LoadState>('loading');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setState('loading');
+    setError(null);
+    try {
+      const page = await fetchHosts();
+      setHosts(page.hosts);
+      const target = selectedHostId ?? page.hosts[0]?.id ?? null;
+      if (target !== null && target !== selectedHostId) onSelectHost(target);
+      setState('ready');
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setState('error');
+    }
+  }, [selectedHostId, onSelectHost]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function run() {
+    if (selectedHostId === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setReport(await runHostDiagnostics(selectedHostId));
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setReport(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <PanelHeading
+        eyebrow="INTELLIGENCE"
+        title="Docker Doctor"
+        description="Run a set of read-only checks against a host to surface connectivity, stopped-container and storage findings."
+        icon={ShieldCheck}
+        actions={
+          <div className="admin-heading-actions">
+            <select
+              className="admin-select"
+              value={selectedHostId ?? ''}
+              onChange={(event) => {
+                onSelectHost(event.target.value === '' ? null : event.target.value);
+                setReport(null);
+              }}
+              aria-label="Select host"
+            >
+              {hosts.length === 0 && <option value="">No hosts</option>}
+              {hosts.map((host) => (
+                <option key={host.id} value={host.id}>
+                  {host.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="button button--primary button--compact"
+              disabled={busy || selectedHostId === null}
+              onClick={() => void run()}
+            >
+              {busy ? <Loader2 size={13} className="admin-spin" /> : <ShieldCheck size={13} />} Run
+              diagnostics
+            </button>
+          </div>
+        }
+      />
+      {error !== null && <PanelNotice tone="error">{error}</PanelNotice>}
+      {hosts.length === 0 && state === 'ready' ? (
+        <div className="quiet-empty">
+          <span className="quiet-empty-icon">
+            <Server size={17} />
+          </span>
+          <span>
+            <strong>No Docker hosts registered.</strong>
+            <span>Register a host on the Hosts screen first.</span>
+          </span>
+          <span className="empty-line" />
+        </div>
+      ) : state === 'loading' ? (
+        <div className="admin-loading" aria-busy="true">
+          <Loader2 size={15} className="admin-spin" /> Loading hosts
+        </div>
+      ) : report === null ? (
+        <div className="quiet-empty">
+          <span className="quiet-empty-icon">
+            <ShieldCheck size={17} />
+          </span>
+          <span>
+            <strong>No diagnostics run yet.</strong>
+            <span>Select a host and run diagnostics to see its findings.</span>
+          </span>
+          <span className="empty-line" />
+        </div>
+      ) : (
+        <>
+          <div className="doctor-summary">
+            <span className={severityChip(report.overall)}>{report.overall.toUpperCase()}</span>
+            <span className="admin-heading-detail">
+              {report.hostName} · checked {formatTimestamp(report.checkedAt)}
+            </span>
+          </div>
+          <ul className="doctor-list">
+            {report.checks.map((check) => (
+              <li key={check.id} className="doctor-item">
+                <span className={severityChip(check.severity)}>{check.severity.toUpperCase()}</span>
+                <div className="doctor-item-copy">
+                  <strong>{check.title}</strong>
+                  <span>{check.summary}</span>
+                  {check.detail !== null && <code className="doctor-detail">{check.detail}</code>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </>
   );

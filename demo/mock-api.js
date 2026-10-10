@@ -185,6 +185,26 @@
     save();
   }
 
+  function demoImages(hostId) {
+    const tags = ['nginx:alpine', 'postgres:17', 'ghcr.io/dockpilot/agent:1.2.0'];
+    const hostIndex = Math.max(
+      0,
+      state.hosts.findIndex((item) => item.id === hostId),
+    );
+    return tags.map((tag, index) => ({
+      id: `sha256:${dockerId(hostIndex * 20 + index + 1)}`,
+      repoDigests: [],
+      repoTags: [tag],
+      sizeBytes: 20_000_000 + index * 7_000_000,
+      sharedSizeBytes: 0,
+      containerCount: state.containers.filter(
+        (item) => item.hostId === hostId && item.image === tag,
+      ).length,
+      dangling: false,
+      createdAt: new Date(Date.now() - 86_400_000 * (index + 1)).toISOString(),
+    }));
+  }
+
   function systemStatus() {
     return {
       setupRequired: !state.user,
@@ -514,6 +534,158 @@
     if (hostContainersMatch && method === 'GET') {
       const containers = state.containers.filter((item) => item.hostId === hostContainersMatch[1]);
       return json({ containers, nextCursor: null });
+    }
+    const hostImagesMatch = path.match(/^\/api\/v1\/admin\/hosts\/([^/]+)\/images$/);
+    if (hostImagesMatch && method === 'GET') {
+      const host = state.hosts.find((item) => item.id === hostImagesMatch[1]);
+      if (!host) return error('NOT_FOUND', 'Host not found.', 404);
+      return json({ images: demoImages(host.id), nextCursor: null });
+    }
+    if (hostImagesMatch && method === 'DELETE') {
+      const host = state.hosts.find((item) => item.id === hostImagesMatch[1]);
+      if (!host) return error('NOT_FOUND', 'Host not found.', 404);
+      const body = await request.json().catch(() => ({}));
+      const approval = {
+        id: makeId(),
+        toolName: 'admin.image_removal',
+        actionType: 'image.remove',
+        permissionLevel: 'destructive',
+        targetType: 'image',
+        targetId: body.imageId || null,
+        arguments: { hostId: host.id, imageId: body.imageId || null },
+        justification: body.justification || 'Administrator image removal request (demo).',
+        status: 'pending',
+        requestedByCredentialId: null,
+        requestedByCredentialName: null,
+        requestedByAgentIdentity: null,
+        decidedByUserId: null,
+        decidedAt: null,
+        decisionNote: null,
+        executionAuditEventId: null,
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        createdAt: now(),
+      };
+      state.approvals.unshift(approval);
+      addEvent({
+        action: 'image.removal_requested',
+        toolName: null,
+        agentIdentity: null,
+        actorUserId: state.user.id,
+        resourceType: 'image',
+        resourceId: host.id,
+        targetType: 'image',
+        targetId: body.imageId || null,
+        approvalId: approval.id,
+        resultSummary: { approvalRequired: true },
+      });
+      save();
+      return json({ approval }, 202);
+    }
+    const hostDiagnosticsMatch = path.match(/^\/api\/v1\/admin\/hosts\/([^/]+)\/diagnostics$/);
+    if (hostDiagnosticsMatch && method === 'GET') {
+      const host = state.hosts.find((item) => item.id === hostDiagnosticsMatch[1]);
+      if (!host) return error('NOT_FOUND', 'Host not found.', 404);
+      const stopped = state.containers.filter(
+        (item) => item.hostId === host.id && item.state !== 'running',
+      ).length;
+      const checks = [
+        {
+          id: 'engine_reachable',
+          title: 'Docker engine reachable',
+          severity: 'ok',
+          summary: 'The simulated engine answered.',
+          detail: 'Response received in 14 ms (simulated).',
+        },
+        {
+          id: 'docker_version',
+          title: 'Docker version reported',
+          severity: 'ok',
+          summary: `Docker ${host.dockerVersion} (simulated).`,
+          detail: null,
+        },
+        {
+          id: 'stopped_containers',
+          title: 'Stopped containers',
+          severity: stopped > 2 ? 'warning' : 'info',
+          summary: `${stopped} simulated container(s) are not running.`,
+          detail: null,
+        },
+        {
+          id: 'disk_usage',
+          title: 'Image storage',
+          severity: 'info',
+          summary: 'Simulated image layer usage is within normal range.',
+          detail: null,
+        },
+      ];
+      const overall = stopped > 2 ? 'warning' : 'ok';
+      addEvent({
+        action: 'host.diagnosed',
+        toolName: null,
+        agentIdentity: null,
+        actorUserId: state.user.id,
+        resourceType: 'host',
+        resourceId: host.id,
+        targetType: 'host',
+        targetId: host.id,
+        resultSummary: { overall },
+      });
+      save();
+      return json({
+        diagnostics: {
+          hostId: host.id,
+          hostName: host.name,
+          overall,
+          checkedAt: now(),
+          checks,
+        },
+      });
+    }
+    if (path === '/api/v1/admin/docker-summary' && method === 'GET') {
+      const healthy = state.hosts.filter((item) => item.status === 'healthy').length;
+      const errored = state.hosts.filter((item) => item.status === 'error').length;
+      const disabled = state.hosts.filter((item) => item.status === 'disabled').length;
+      const running = state.containers.filter((item) => item.state === 'running').length;
+      const lastSynced =
+        state.containers
+          .map((item) => item.syncedAt)
+          .filter(Boolean)
+          .sort()
+          .pop() || null;
+      return json({
+        summary: {
+          hosts: state.hosts.length,
+          healthyHosts: healthy,
+          errorHosts: errored,
+          disabledHosts: disabled,
+          containers: state.containers.length,
+          runningContainers: running,
+          stoppedContainers: state.containers.length - running,
+          lastSyncedAt: lastSynced,
+        },
+      });
+    }
+    const containerStatsMatch = path.match(/^\/api\/v1\/admin\/containers\/([a-f0-9]{64})\/stats$/);
+    if (containerStatsMatch && method === 'GET') {
+      const container = state.containers.find(
+        (item) => item.containerId === containerStatsMatch[1],
+      );
+      if (!container) return error('NOT_FOUND', 'Container not found.', 404);
+      const running = container.state === 'running';
+      return json({
+        stats: {
+          cpuPercent: running ? 3.5 : 0,
+          memoryUsedBytes: running ? 48_000_000 : 0,
+          memoryLimitBytes: 512_000_000,
+          memoryPercent: running ? 9.38 : 0,
+          networkRxBytes: running ? 1024 : 0,
+          networkTxBytes: running ? 2048 : 0,
+          blockReadBytes: running ? 4096 : 0,
+          blockWriteBytes: running ? 8192 : 0,
+          pids: running ? 5 : 0,
+          capturedAt: now(),
+        },
+      });
     }
     const containerMatch = path.match(/^\/api\/v1\/admin\/containers\/([a-f0-9]{64})$/);
     if (containerMatch && method === 'DELETE') {

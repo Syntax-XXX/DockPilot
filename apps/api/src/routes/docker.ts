@@ -5,12 +5,16 @@ import {
   containerActionResponseSchema,
   containerListResponseSchema,
   containerLogResponseSchema,
+  containerStatsResponseSchema,
   createHostInputSchema,
   containerViewResponseSchema,
   createHostResponseSchema,
+  dockerSummaryResponseSchema,
+  hostDiagnosticsResponseSchema,
   hostListResponseSchema,
   hostViewSchema,
   idSchema,
+  imageListResponseSchema,
   updateHostInputSchema,
   updateHostResponseSchema,
   type SafeUser,
@@ -37,6 +41,12 @@ import {
   startContainer,
   stopContainer,
 } from '../services/containers.js';
+import {
+  containerStats,
+  getDockerSummary,
+  listImages,
+  runHostDiagnostics,
+} from '../services/docker-insights.js';
 import { createApproval } from '../services/approvals.js';
 
 const containerIdSchema = z
@@ -55,6 +65,16 @@ const containerQuerySchema = pageQuerySchema.extend({
 const hostParamsSchema = z.strictObject({ id: idSchema });
 const containerParamsSchema = z.strictObject({ containerId: containerIdSchema });
 const removalBodySchema = z.strictObject({
+  justification: z.string().trim().min(4).max(500).optional(),
+});
+const imageIdSchema = z
+  .string()
+  .regex(/^sha256:[a-f0-9]{64}$/u, 'The image reference is not valid.');
+const imageQuerySchema = pageQuerySchema.extend({
+  dangling: z.enum(['true', 'false']).optional(),
+});
+const imageRemovalBodySchema = z.strictObject({
+  imageId: imageIdSchema,
   justification: z.string().trim().min(4).max(500).optional(),
 });
 
@@ -351,6 +371,23 @@ export function dockerRoutes(app: FastifyInstance): void {
     }
   });
 
+  app.get('/containers/:containerId/stats', async (request, reply) => {
+    const user = requireCapability(request, reply, 'read');
+    if (user === null) return reply;
+    const params = containerParamsSchema.safeParse(request.params);
+    if (!params.success) return validationFailure(reply, 'The container identifier is not valid.');
+
+    try {
+      const result = await containerStats({
+        organizationId: user.organizationId,
+        containerId: params.data.containerId,
+      });
+      return await reply.send(containerStatsResponseSchema.parse({ stats: result.stats }));
+    } catch (error) {
+      throw translateDockerError(error);
+    }
+  });
+
   for (const action of ['start', 'stop', 'restart'] as const) {
     app.post(`/containers/:containerId/${action}`, async (request, reply) => {
       const user = requireCapability(request, reply, 'operate');
@@ -425,6 +462,108 @@ export function dockerRoutes(app: FastifyInstance): void {
         approvalId: created.id,
         targetType: 'container',
         targetId: container.containerId,
+      });
+      return created;
+    });
+    return reply.code(202).send(approvalRequestResponseSchema.parse({ approval }));
+  });
+
+  app.get('/docker-summary', async (request, reply) => {
+    const user = requireCapability(request, reply, 'read');
+    if (user === null) return reply;
+    const summary = await getDockerSummary({ organizationId: user.organizationId });
+    return reply.send(dockerSummaryResponseSchema.parse({ summary }));
+  });
+
+  app.get('/hosts/:id/diagnostics', async (request, reply) => {
+    const user = requireCapability(request, reply, 'read');
+    if (user === null) return reply;
+    const params = hostParamsSchema.safeParse(request.params);
+    if (!params.success) return validationFailure(reply, 'The host identifier is not valid.');
+
+    try {
+      const diagnostics = await db.transaction(async (transaction) => {
+        const result = await runHostDiagnostics({
+          organizationId: user.organizationId,
+          hostId: params.data.id,
+          executor: transaction,
+        });
+        await writeAuditEvent(transaction, {
+          organizationId: user.organizationId,
+          actorUserId: user.id,
+          action: 'host.diagnosed',
+          resourceType: 'host',
+          resourceId: result.hostId,
+          requestId: request.id,
+          resultSummary: { overall: result.overall, checks: result.checks.length },
+        });
+        return result;
+      });
+      return await reply.send(hostDiagnosticsResponseSchema.parse({ diagnostics }));
+    } catch (error) {
+      throw translateDockerError(error);
+    }
+  });
+
+  app.get('/hosts/:id/images', async (request, reply) => {
+    const user = requireCapability(request, reply, 'read');
+    if (user === null) return reply;
+    const params = hostParamsSchema.safeParse(request.params);
+    if (!params.success) return validationFailure(reply, 'The host identifier is not valid.');
+    const query = imageQuerySchema.safeParse(request.query);
+    if (!query.success) return validationFailure(reply, 'The pagination parameters are not valid.');
+
+    try {
+      const page = await listImages({
+        organizationId: user.organizationId,
+        hostId: params.data.id,
+        limit: query.data.limit,
+        cursor: query.data.cursor,
+        danglingOnly: query.data.dangling === 'true',
+      });
+      return await reply.send(imageListResponseSchema.parse(page));
+    } catch (error) {
+      throw translateDockerError(error);
+    }
+  });
+
+  app.delete('/hosts/:id/images', async (request, reply) => {
+    const user = requireCapability(request, reply, 'remove');
+    if (user === null) return reply;
+    const params = hostParamsSchema.safeParse(request.params);
+    if (!params.success) return validationFailure(reply, 'The host identifier is not valid.');
+    const body = imageRemovalBodySchema.safeParse(request.body ?? {});
+    if (!body.success) return validationFailure(reply, 'The image removal request is not valid.');
+
+    const approval = await db.transaction(async (transaction) => {
+      const host = await getHost({
+        organizationId: user.organizationId,
+        hostId: params.data.id,
+        executor: transaction,
+      });
+      const created = await createApproval({
+        organizationId: user.organizationId,
+        requestedByCredentialId: null,
+        toolName: 'admin.image_removal',
+        actionType: 'image.remove',
+        permissionLevel: 'destructive',
+        targetType: 'image',
+        targetId: body.data.imageId,
+        args: { hostId: host.id, imageId: body.data.imageId },
+        justification:
+          body.data.justification ?? `Administrator removal of image ${body.data.imageId}.`,
+        executor: transaction,
+      });
+      await writeAuditEvent(transaction, {
+        organizationId: user.organizationId,
+        actorUserId: user.id,
+        action: 'image.removal_requested',
+        resourceType: 'image',
+        resourceId: body.data.imageId,
+        requestId: request.id,
+        approvalId: created.id,
+        targetType: 'image',
+        targetId: body.data.imageId,
       });
       return created;
     });

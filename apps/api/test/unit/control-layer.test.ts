@@ -34,6 +34,8 @@ import {
   dockerVersion,
   inspectContainer,
   socketExists,
+  stopContainer,
+  restartContainer,
 } from '../../src/lib/docker.js';
 import { createServer, type Socket } from 'node:net';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -315,6 +317,49 @@ describe('Docker API request timeout enforcement', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    ['stop', stopContainer],
+    ['restart', restartContainer],
+  ])(
+    'allows %s to wait out the engine stop grace period beyond the default request timeout',
+    async (_name, action) => {
+      const directory = await mkdtemp(path.join(tmpdir(), 'dockpilot-docker-stop-timeout-'));
+      const socketPath = path.join(directory, 'docker.sock');
+      const sockets: Socket[] = [];
+      // Docker holds the response for up to `t` seconds while it signals the container.
+      // With the default 10s grace period this outlasts the 5s default request timeout,
+      // so the action must use a longer deadline or it fails on a healthy engine.
+      const server = createServer((socket) => {
+        sockets.push(socket);
+        let request = '';
+        socket.on('data', (chunk) => {
+          request += chunk.toString();
+          if (!request.includes('\r\n\r\n')) return;
+          setTimeout(() => {
+            if (socket.destroyed) return;
+            socket.write('HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n');
+            socket.end();
+          }, 5_500);
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+      try {
+        await expect(action({ kind: 'unix', socketPath }, 'a'.repeat(64))).resolves.toBeUndefined();
+      } finally {
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error) reject(error);
+            else resolve();
+          });
+        });
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
 });
 
 describe('Docker log retrieval', () => {

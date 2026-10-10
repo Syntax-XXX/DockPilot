@@ -9,11 +9,15 @@ import {
   containerActionResponseSchema,
   containerListResponseSchema,
   containerLogResponseSchema,
+  containerStatsResponseSchema,
   containerViewResponseSchema,
   createAiCredentialResponseSchema,
   createHostResponseSchema,
+  dockerSummaryResponseSchema,
+  hostDiagnosticsResponseSchema,
   hostListResponseSchema,
   hostViewSchema,
+  imageListResponseSchema,
   revokeAiCredentialResponseSchema,
   sessionResponseSchema,
   systemStatusSchema,
@@ -22,10 +26,14 @@ import {
   type ApprovalView,
   type AuditEvent,
   type AuditEventQuery,
+  type ContainerStats,
   type ContainerView,
   type CreateAiCredentialInput,
   type CreateHostInput,
+  type DockerSummary,
+  type HostDiagnostics,
   type HostView,
+  type ImageView,
   type LoginInput,
   type SafeUser,
   type SetupAccountInput,
@@ -402,6 +410,54 @@ export function requestContainerRemoval(
   return requestAdmin(
     `/containers/${encodeURIComponent(containerId)}`,
     { method: 'DELETE', body: JSON.stringify({ justification }) },
+    approvalRequestResponseSchema,
+  );
+}
+
+export function fetchDockerSummary(): Promise<DockerSummary> {
+  return requestAdmin('/docker-summary', {}, dockerSummaryResponseSchema).then(
+    (parsed) => parsed.summary,
+  );
+}
+
+export function fetchContainerStats(containerId: string): Promise<ContainerStats> {
+  return requestAdmin(
+    `/containers/${encodeURIComponent(containerId)}/stats`,
+    {},
+    containerStatsResponseSchema,
+  ).then((parsed) => parsed.stats);
+}
+
+export function runHostDiagnostics(hostId: string): Promise<HostDiagnostics> {
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(hostId)}/diagnostics`,
+    {},
+    hostDiagnosticsResponseSchema,
+  ).then((parsed) => parsed.diagnostics);
+}
+
+export interface ImagePage {
+  images: ImageView[];
+  nextCursor: string | null;
+}
+
+export function fetchImages(hostId: string, cursor?: string): Promise<ImagePage> {
+  const query = cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`;
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(hostId)}/images${query}`,
+    {},
+    imageListResponseSchema,
+  );
+}
+
+export function requestImageRemoval(
+  hostId: string,
+  imageId: string,
+  justification: string,
+): Promise<{ approval: ApprovalView }> {
+  return requestAdmin(
+    `/hosts/${encodeURIComponent(hostId)}/images`,
+    { method: 'DELETE', body: JSON.stringify({ imageId, justification }) },
     approvalRequestResponseSchema,
   );
 }

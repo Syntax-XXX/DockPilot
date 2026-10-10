@@ -38,6 +38,12 @@ import {
   startContainer,
   stopContainer,
 } from '../services/containers.js';
+import {
+  containerStats,
+  getDockerSummary,
+  listImages,
+  runHostDiagnostics,
+} from '../services/docker-insights.js';
 
 export const defaultToolPageSize = 25;
 
@@ -673,6 +679,141 @@ export const mcpToolRegistry = {
         targetId: approval.targetId,
         expiresAt: approval.expiresAt,
       };
+    },
+  }),
+
+  dockpilot_get_container_stats: createTool({
+    name: 'dockpilot_get_container_stats',
+    title: 'Get container stats',
+    description:
+      'Returns a single CPU, memory, network and block I/O sample for a container on its host.',
+    mutates: false,
+    resourceType: 'container',
+    outputSchema: mcpToolOutputSchemas.dockpilot_get_container_stats,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_get_container_stats.parse(input);
+      const result = await containerStats({
+        organizationId: context.identity.organizationId,
+        containerId: parsed.containerId,
+        executor: context.executor,
+      });
+      return {
+        stats: {
+          containerId: result.container.containerId,
+          name: result.container.name,
+          cpuPercent: result.stats.cpuPercent,
+          memoryUsedBytes: result.stats.memoryUsedBytes,
+          memoryLimitBytes: result.stats.memoryLimitBytes,
+          memoryPercent: result.stats.memoryPercent,
+          networkRxBytes: result.stats.networkRxBytes,
+          networkTxBytes: result.stats.networkTxBytes,
+          pids: result.stats.pids,
+          capturedAt: result.stats.capturedAt,
+        },
+      };
+    },
+  }),
+
+  dockpilot_run_host_diagnostics: createTool({
+    name: 'dockpilot_run_host_diagnostics',
+    title: 'Run host diagnostics',
+    description:
+      'Runs DockPilot Doctor checks against a registered Docker host and returns findings.',
+    mutates: false,
+    resourceType: 'host',
+    outputSchema: mcpToolOutputSchemas.dockpilot_run_host_diagnostics,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_run_host_diagnostics.parse(input);
+      const diagnostics = await runHostDiagnostics({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        executor: context.executor,
+      });
+      return { diagnostics };
+    },
+  }),
+
+  dockpilot_list_images: createTool({
+    name: 'dockpilot_list_images',
+    title: 'List host images',
+    description: 'Lists the images present on a registered Docker host.',
+    mutates: false,
+    resourceType: 'image',
+    outputSchema: mcpToolOutputSchemas.dockpilot_list_images,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_list_images.parse(input);
+      const page = await listImages({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        limit: parsed.limit ?? defaultToolPageSize,
+        cursor: parsed.cursor,
+        executor: context.executor,
+      });
+      return {
+        images: page.images.map((image) => ({
+          id: image.id,
+          repoTags: image.repoTags,
+          sizeBytes: image.sizeBytes,
+          containerCount: image.containerCount,
+          dangling: image.dangling,
+          createdAt: image.createdAt,
+        })),
+        nextCursor: page.nextCursor,
+      };
+    },
+  }),
+
+  dockpilot_request_image_removal: createTool({
+    name: 'dockpilot_request_image_removal',
+    title: 'Request image removal',
+    description:
+      'Creates a pending human approval request to remove an image from a host. The image is not removed until an administrator approves the request.',
+    mutates: true,
+    resourceType: 'ai_approval',
+    outputSchema: mcpToolOutputSchemas.dockpilot_request_image_removal,
+    handler: async (input, context) => {
+      const parsed = mcpToolInputSchemas.dockpilot_request_image_removal.parse(input);
+      const host = await getHost({
+        organizationId: context.identity.organizationId,
+        hostId: parsed.hostId,
+        executor: context.executor,
+      });
+      const approval = await createApproval({
+        organizationId: context.identity.organizationId,
+        requestedByCredentialId: context.identity.credentialId,
+        toolName: 'dockpilot_request_image_removal',
+        actionType: 'image.remove',
+        permissionLevel: 'destructive',
+        targetType: 'image',
+        targetId: parsed.imageId,
+        args: { hostId: host.id, imageId: parsed.imageId },
+        justification: parsed.justification,
+        executor: context.executor,
+      });
+      return {
+        approvalRequired: true,
+        approvalId: approval.id,
+        status: 'pending',
+        targetType: 'image',
+        targetId: approval.targetId,
+        expiresAt: approval.expiresAt,
+      };
+    },
+  }),
+
+  dockpilot_docker_summary: createTool({
+    name: 'dockpilot_docker_summary',
+    title: 'Get Docker summary',
+    description:
+      'Returns organization-scoped counts for Docker hosts and the containers DockPilot has synced.',
+    mutates: false,
+    resourceType: 'container',
+    outputSchema: mcpToolOutputSchemas.dockpilot_docker_summary,
+    handler: async (_input, context) => {
+      return await getDockerSummary({
+        organizationId: context.identity.organizationId,
+        executor: context.executor,
+      });
     },
   }),
 } satisfies Record<McpToolName, McpToolDefinition>;

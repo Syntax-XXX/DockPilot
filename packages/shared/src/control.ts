@@ -384,3 +384,89 @@ export type HostListResponse = z.infer<typeof hostListResponseSchema>;
 export type ContainerView = z.infer<typeof containerViewSchema>;
 export type ContainerLogView = z.infer<typeof containerLogViewSchema>;
 export type ContainerListResponse = z.infer<typeof containerListResponseSchema>;
+
+export const containerStatsSchema = z
+  .object({
+    cpuPercent: z.number().nonnegative(),
+    memoryUsedBytes: z.number().int().nonnegative(),
+    memoryLimitBytes: z.number().int().nonnegative(),
+    memoryPercent: z.number().nonnegative(),
+    networkRxBytes: z.number().int().nonnegative(),
+    networkTxBytes: z.number().int().nonnegative(),
+    blockReadBytes: z.number().int().nonnegative(),
+    blockWriteBytes: z.number().int().nonnegative(),
+    pids: z.number().int().nonnegative(),
+    capturedAt: isoDateTimeSchema,
+  })
+  .strict();
+
+export const containerStatsResponseSchema = z.object({ stats: containerStatsSchema }).strict();
+
+export const diagnosticSeveritySchema = z.enum(['ok', 'info', 'warning', 'critical']);
+
+export const diagnosticCheckSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    severity: diagnosticSeveritySchema,
+    summary: z.string(),
+    detail: z.string().nullable(),
+  })
+  .strict();
+
+export const hostDiagnosticsSchema = z
+  .object({
+    hostId: idSchema,
+    hostName: z.string(),
+    overall: diagnosticSeveritySchema,
+    checkedAt: isoDateTimeSchema,
+    checks: z.array(diagnosticCheckSchema),
+  })
+  .strict();
+
+export const hostDiagnosticsResponseSchema = z
+  .object({ diagnostics: hostDiagnosticsSchema })
+  .strict();
+
+export const imageViewSchema = z
+  .object({
+    id: z.string(),
+    repoDigests: z.array(z.string()),
+    repoTags: z.array(z.string()),
+    sizeBytes: z.number().int().nonnegative(),
+    sharedSizeBytes: z.number().int().nonnegative(),
+    containerCount: z.number().int().nonnegative(),
+    dangling: z.boolean(),
+    createdAt: isoDateTimeSchema,
+  })
+  .strict();
+
+export const imageListResponseSchema = z
+  .object({
+    images: z.array(imageViewSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+
+export const dockerSummarySchema = z
+  .object({
+    hosts: z.number().int().nonnegative(),
+    healthyHosts: z.number().int().nonnegative(),
+    errorHosts: z.number().int().nonnegative(),
+    disabledHosts: z.number().int().nonnegative(),
+    containers: z.number().int().nonnegative(),
+    runningContainers: z.number().int().nonnegative(),
+    stoppedContainers: z.number().int().nonnegative(),
+    lastSyncedAt: isoDateTimeSchema.nullable(),
+  })
+  .strict();
+
+export const dockerSummaryResponseSchema = z.object({ summary: dockerSummarySchema }).strict();
+
+export type ContainerStats = z.infer<typeof containerStatsSchema>;
+export type DiagnosticSeverity = z.infer<typeof diagnosticSeveritySchema>;
+export type DiagnosticCheck = z.infer<typeof diagnosticCheckSchema>;
+export type HostDiagnostics = z.infer<typeof hostDiagnosticsSchema>;
+export type ImageView = z.infer<typeof imageViewSchema>;
+export type ImageListResponse = z.infer<typeof imageListResponseSchema>;
+export type DockerSummary = z.infer<typeof dockerSummarySchema>;

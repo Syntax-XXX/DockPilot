@@ -35,11 +35,12 @@ import {
   logIn,
   logOut,
   fetchSystemStatus,
+  fetchDockerSummary,
   ApiError,
 } from '../lib/api.js';
 import { AdminControl, isAdministrator, type AdminSection } from './AdminControl.js';
 import { DockerControl, type DockerSection } from './DockerControl.js';
-import type { SafeUser } from '@dockpilot/shared';
+import type { DockerSummary, SafeUser } from '@dockpilot/shared';
 
 type LoadState = 'loading' | 'ready' | 'error';
 type ConsoleSection = 'overview' | DockerSection | AdminSection;
@@ -585,10 +586,21 @@ function OperatorConsole({
   });
   const [statusRefreshing, setStatusRefreshing] = useState(false);
   const [lastStatusUpdate, setLastStatusUpdate] = useState<Date | null>(null);
+  const [dockerSummary, setDockerSummary] = useState<DockerSummary | null>(null);
   const statusRequestInFlight = useRef(false);
   const operatorMounted = useRef(false);
   const administrator = isAdministrator(user);
   const showAdministrativeStatus = (content: React.ReactNode) => (administrator ? content : null);
+  const refreshDockerSummary = useCallback(async () => {
+    try {
+      const summary = await fetchDockerSummary();
+      if (!operatorMounted.current) return;
+      setDockerSummary(summary);
+    } catch {
+      if (!operatorMounted.current) return;
+      setDockerSummary(null);
+    }
+  }, []);
   const refreshOperationalStatus = useCallback(async () => {
     if (statusRequestInFlight.current) return;
     statusRequestInFlight.current = true;
@@ -622,12 +634,16 @@ function OperatorConsole({
     if (!administrator) return;
 
     void refreshOperationalStatus();
-    const interval = window.setInterval(() => void refreshOperationalStatus(), 30_000);
+    void refreshDockerSummary();
+    const interval = window.setInterval(() => {
+      void refreshOperationalStatus();
+      void refreshDockerSummary();
+    }, 30_000);
     return () => {
       operatorMounted.current = false;
       window.clearInterval(interval);
     };
-  }, [administrator, refreshOperationalStatus]);
+  }, [administrator, refreshOperationalStatus, refreshDockerSummary]);
   async function doLogout() {
     setLogoutBusy(true);
     await onLogout();
@@ -683,12 +699,26 @@ function OperatorConsole({
               setSection('containers');
             }}
           />
-          <NavItem icon={Box} title="Images" />
+          <SectionNavItem
+            icon={Box}
+            title="Images"
+            active={section === 'images'}
+            onSelect={() => {
+              setSection('images');
+            }}
+          />
           <NavItem icon={Database} title="Volumes" />
           <NavItem icon={Network} title="Networks" />
           <div className="sidebar-nav-divider" />
           <span className="nav-section-label nav-section-label--spaced">INTELLIGENCE</span>
-          <NavItem icon={Sparkles} title="Docker Doctor" badge="SOON" />
+          <SectionNavItem
+            icon={Sparkles}
+            title="Docker Doctor"
+            active={section === 'doctor'}
+            onSelect={() => {
+              setSection('doctor');
+            }}
+          />
           <NavItem icon={ShieldCheck} title="Backups" badge="SOON" />
           <NavItem icon={Activity} title="Alerts" />
           {administrator && (
@@ -906,6 +936,28 @@ function OperatorConsole({
                     sub="Database connection"
                     accent="purple"
                   />
+                  <StatCard
+                    icon={Server}
+                    label="DOCKER HOSTS"
+                    value={dockerSummary === null ? '—' : String(dockerSummary.hosts)}
+                    sub={
+                      dockerSummary === null
+                        ? 'No host data'
+                        : `${String(dockerSummary.healthyHosts)} healthy · ${String(dockerSummary.errorHosts)} error`
+                    }
+                    accent="blue"
+                  />
+                  <StatCard
+                    icon={Container}
+                    label="CONTAINERS SYNCED"
+                    value={dockerSummary === null ? '—' : String(dockerSummary.containers)}
+                    sub={
+                      dockerSummary === null
+                        ? 'No container data'
+                        : `${String(dockerSummary.runningContainers)} running · ${String(dockerSummary.stoppedContainers)} stopped`
+                    }
+                    accent="green"
+                  />
                 </div>,
               )}
               <section className="connect-card">
@@ -1104,7 +1156,10 @@ function OperatorConsole({
                 </span>
               </footer>
             </>
-          ) : section === 'hosts' || section === 'containers' ? (
+          ) : section === 'hosts' ||
+            section === 'containers' ||
+            section === 'images' ||
+            section === 'doctor' ? (
             <DockerControl
               section={section}
               user={user}
@@ -1142,6 +1197,8 @@ function sectionTitle(section: ConsoleSection): string {
   if (section === 'approvals') return 'Approvals';
   if (section === 'hosts') return 'Hosts';
   if (section === 'containers') return 'Containers';
+  if (section === 'images') return 'Images';
+  if (section === 'doctor') return 'Docker Doctor';
   return 'Overview';
 }
 

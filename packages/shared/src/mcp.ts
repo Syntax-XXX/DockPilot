@@ -3,7 +3,7 @@ import type { AiPermissionLevel } from './control.js';
 
 export const mcpContractVersion = 1;
 export const mcpServerName = 'dockpilot';
-export const mcpServerVersion = '0.2.0';
+export const mcpServerVersion = '0.3.0';
 
 export const mcpRateCategorySchema = z.enum(['read', 'write', 'destructive']);
 export type McpRateCategory = z.infer<typeof mcpRateCategorySchema>;
@@ -261,6 +261,68 @@ export const mcpToolOutputSchemas = {
     targetId: z.string(),
     expiresAt: z.string(),
   }),
+  dockpilot_get_container_stats: z.strictObject({
+    stats: z.strictObject({
+      containerId: z.string(),
+      name: z.string().nullable(),
+      cpuPercent: z.number().nonnegative(),
+      memoryUsedBytes: z.number().int().nonnegative(),
+      memoryLimitBytes: z.number().int().nonnegative(),
+      memoryPercent: z.number().nonnegative(),
+      networkRxBytes: z.number().int().nonnegative(),
+      networkTxBytes: z.number().int().nonnegative(),
+      pids: z.number().int().nonnegative(),
+      capturedAt: z.string(),
+    }),
+  }),
+  dockpilot_run_host_diagnostics: z.strictObject({
+    diagnostics: z.strictObject({
+      hostId: z.string(),
+      hostName: z.string(),
+      overall: z.string(),
+      checkedAt: z.string(),
+      checks: z.array(
+        z.strictObject({
+          id: z.string(),
+          title: z.string(),
+          severity: z.string(),
+          summary: z.string(),
+          detail: z.string().nullable(),
+        }),
+      ),
+    }),
+  }),
+  dockpilot_list_images: z.strictObject({
+    images: z.array(
+      z.strictObject({
+        id: z.string(),
+        repoTags: z.array(z.string()),
+        sizeBytes: z.number().int().nonnegative(),
+        containerCount: z.number().int().nonnegative(),
+        dangling: z.boolean(),
+        createdAt: z.string(),
+      }),
+    ),
+    nextCursor: z.string().nullable(),
+  }),
+  dockpilot_request_image_removal: z.strictObject({
+    approvalRequired: z.literal(true),
+    approvalId: z.string(),
+    status: z.literal('pending'),
+    targetType: z.literal('image'),
+    targetId: z.string(),
+    expiresAt: z.string(),
+  }),
+  dockpilot_docker_summary: z.strictObject({
+    hosts: z.number().int().nonnegative(),
+    healthyHosts: z.number().int().nonnegative(),
+    errorHosts: z.number().int().nonnegative(),
+    disabledHosts: z.number().int().nonnegative(),
+    containers: z.number().int().nonnegative(),
+    runningContainers: z.number().int().nonnegative(),
+    stoppedContainers: z.number().int().nonnegative(),
+    lastSyncedAt: z.string().nullable(),
+  }),
 } as const;
 
 export const mcpToolInputSchemas = {
@@ -351,6 +413,23 @@ export const mcpToolInputSchemas = {
     containerId: z.string().regex(/^[a-f0-9]{64}$/u, 'Invalid container identifier.'),
     justification: z.string().trim().min(4).max(500),
   }),
+  dockpilot_get_container_stats: z.strictObject({
+    containerId: z.string().regex(/^[a-f0-9]{64}$/u, 'Invalid container identifier.'),
+  }),
+  dockpilot_run_host_diagnostics: z.strictObject({
+    hostId: z.uuid(),
+  }),
+  dockpilot_list_images: z.strictObject({
+    hostId: z.uuid(),
+    limit: boundedLimit.optional(),
+    cursor: z.string().max(256).optional(),
+  }),
+  dockpilot_request_image_removal: z.strictObject({
+    hostId: z.uuid(),
+    imageId: z.string().regex(/^sha256:[a-f0-9]{64}$/u, 'Invalid image reference.'),
+    justification: z.string().trim().min(4).max(500),
+  }),
+  dockpilot_docker_summary: z.strictObject({}),
 } as const;
 
 export const mcpToolNameSchema = z.enum([
@@ -375,6 +454,11 @@ export const mcpToolNameSchema = z.enum([
   'dockpilot_set_container_state',
   'dockpilot_request_host_removal',
   'dockpilot_request_container_removal',
+  'dockpilot_get_container_stats',
+  'dockpilot_run_host_diagnostics',
+  'dockpilot_list_images',
+  'dockpilot_request_image_removal',
+  'dockpilot_docker_summary',
 ]);
 
 export type McpToolName = z.infer<typeof mcpToolNameSchema>;
@@ -514,6 +598,36 @@ export const mcpToolCatalog: Record<McpToolName, McpToolSecurityMetadata> = {
     rateCategory: 'destructive',
     actionType: 'mcp.request_container_removal',
     destructive: true,
+  },
+  dockpilot_get_container_stats: {
+    permissionLevel: 'read',
+    rateCategory: 'read',
+    actionType: 'mcp.get_container_stats',
+    destructive: false,
+  },
+  dockpilot_run_host_diagnostics: {
+    permissionLevel: 'read',
+    rateCategory: 'read',
+    actionType: 'mcp.run_host_diagnostics',
+    destructive: false,
+  },
+  dockpilot_list_images: {
+    permissionLevel: 'read',
+    rateCategory: 'read',
+    actionType: 'mcp.list_images',
+    destructive: false,
+  },
+  dockpilot_request_image_removal: {
+    permissionLevel: 'destructive',
+    rateCategory: 'destructive',
+    actionType: 'mcp.request_image_removal',
+    destructive: true,
+  },
+  dockpilot_docker_summary: {
+    permissionLevel: 'read',
+    rateCategory: 'read',
+    actionType: 'mcp.docker_summary',
+    destructive: false,
   },
 };
 

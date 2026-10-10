@@ -9,6 +9,7 @@ import { revokeAiCredential } from './ai-credentials.js';
 import { revokeSession } from './sessions.js';
 import { removeHost } from './hosts.js';
 import { removeContainer } from './containers.js';
+import { removeImageOnHost } from './docker-insights.js';
 import type { AiPermissionLevel, ApprovalStatus, ApprovalView } from '@dockpilot/shared';
 
 export const approvalLifetimeMs = 60 * 60 * 1000;
@@ -226,6 +227,7 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
         toolName: aiApprovals.toolName,
         requestedByCredentialId: aiApprovals.requestedByCredentialId,
         expiresAt: aiApprovals.expiresAt,
+        arguments: aiApprovals.arguments,
       })
       .from(aiApprovals)
       .where(
@@ -313,6 +315,7 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
         organizationId: input.organizationId,
         actionType: approval.actionType,
         targetId: approval.targetId,
+        args: approval.arguments,
       });
     } catch (error) {
       await transaction
@@ -387,7 +390,12 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
 
 async function executeApprovedAction(
   transaction: DbExecutor,
-  input: { organizationId: string; actionType: string; targetId: string },
+  input: {
+    organizationId: string;
+    actionType: string;
+    targetId: string;
+    args: Record<string, unknown>;
+  },
 ): Promise<{ action: string; resourceType: string; summary: Record<string, unknown> }> {
   switch (input.actionType) {
     case 'session.revoke': {
@@ -436,6 +444,23 @@ async function executeApprovedAction(
         action: 'container.removed',
         resourceType: 'container',
         summary: { containerId: input.targetId },
+      };
+    }
+    case 'image.remove': {
+      const hostId = typeof input.args.hostId === 'string' ? input.args.hostId : null;
+      if (hostId === null) {
+        throw conflictError('The approval is missing the target host for image removal.');
+      }
+      await removeImageOnHost({
+        organizationId: input.organizationId,
+        hostId,
+        imageId: input.targetId,
+        executor: transaction,
+      });
+      return {
+        action: 'image.removed',
+        resourceType: 'image',
+        summary: { imageId: input.targetId, hostId },
       };
     }
     default:

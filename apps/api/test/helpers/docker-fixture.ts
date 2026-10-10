@@ -11,10 +11,19 @@ export interface FixtureContainer {
   status: string;
 }
 
+export interface FixtureImage {
+  id: string;
+  repoTags: string[];
+  size: number;
+  containers: number;
+}
+
 export interface DockerFixture {
   socketPath: string;
   endpoint: string;
   containers: FixtureContainer[];
+  images: FixtureImage[];
+  removedImages: string[];
   stop: () => Promise<void>;
 }
 
@@ -37,9 +46,26 @@ function logFrames(log: string): Buffer {
 
 export async function startDockerFixture(
   containers: FixtureContainer[],
-  socketPath = process.env.DOCKPILOT_DOCKER_SOCKETS ??
-    path.join(tmpdir(), 'dockpilot-test-docker.sock'),
+  options: {
+    socketPath?: string;
+    images?: FixtureImage[];
+    state?: { running: boolean };
+  } = {},
 ): Promise<DockerFixture> {
+  const socketPath =
+    options.socketPath ??
+    process.env.DOCKPILOT_DOCKER_SOCKETS ??
+    path.join(tmpdir(), 'dockpilot-test-docker.sock');
+  const images = options.images ?? [
+    {
+      id: `sha256:${'a'.repeat(64)}`,
+      repoTags: ['nginx:alpine'],
+      size: 23_000_000,
+      containers: 1,
+    },
+  ];
+  const state = options.state ?? { running: true };
+  const removedImages: string[] = [];
   const server: Server = createServer((socket: Socket) => {
     let buffer = '';
     socket.on('data', (chunk) => {
@@ -49,7 +75,7 @@ export async function startDockerFixture(
       const requestLine = buffer.slice(0, buffer.indexOf('\r\n'));
       const [method, target] = requestLine.split(' ');
       const url = new URL(target ?? '/', 'http://docker');
-      const pathname = url.pathname;
+      const pathname = decodeURIComponent(url.pathname);
       buffer = '';
 
       if (method === 'GET' && pathname === '/version') {
@@ -63,6 +89,20 @@ export async function startDockerFixture(
             KernelVersion: 'fixture',
             BuildTime: 'fixture',
             Experimental: false,
+          }),
+        );
+        return;
+      }
+      if (method === 'GET' && pathname === '/info') {
+        socket.end(
+          jsonBody({
+            ID: 'fixture-daemon',
+            Driver: 'overlay2',
+            DockerRootDir: '/var/lib/docker',
+            Containers: containers.length,
+            Images: images.length,
+            NCPU: 4,
+            MemTotal: 8_000_000_000,
           }),
         );
         return;
@@ -86,6 +126,63 @@ export async function startDockerFixture(
         );
         return;
       }
+      const statsMatch = /^\/containers\/([a-f0-9]{64})\/stats$/u.exec(pathname);
+      if (method === 'GET' && statsMatch) {
+        socket.end(
+          jsonBody({
+            read: new Date().toISOString(),
+            cpu_stats: {
+              cpu_usage: { total_usage: 2_000_000 },
+              system_cpu_usage: 10_000_000,
+              online_cpus: 2,
+            },
+            precpu_stats: {
+              cpu_usage: { total_usage: 1_000_000 },
+              system_cpu_usage: 8_000_000,
+              online_cpus: 2,
+            },
+            memory_stats: {
+              usage: 120_000_000,
+              limit: 512_000_000,
+              stats: { inactive_file: 20_000_000 },
+            },
+            networks: { eth0: { rx_bytes: 1000, tx_bytes: 2000 } },
+            blkio_stats: {
+              io_service_bytes_recursive: [
+                { op: 'read', value: 3000 },
+                { op: 'write', value: 4000 },
+              ],
+            },
+            pids_stats: { current: 7 },
+          }),
+        );
+        return;
+      }
+      if (method === 'GET' && pathname === '/images/json') {
+        const danglingOnly = url.searchParams.get('all') === '0';
+        const listed = danglingOnly
+          ? images.filter((image) => image.repoTags.length === 0)
+          : images;
+        socket.end(
+          jsonBody(
+            listed.map((image) => ({
+              Id: image.id,
+              RepoTags: image.repoTags,
+              RepoDigests: [],
+              Size: image.size,
+              Created: 1_700_000_000,
+              Containers: image.containers,
+            })),
+          ),
+        );
+        return;
+      }
+      const imageDeleteMatch = /^\/images\/(sha256:[a-f0-9]{64})$/u.exec(pathname);
+      if (method === 'DELETE' && imageDeleteMatch) {
+        removedImages.push(imageDeleteMatch[1] ?? '');
+        socket.end(jsonBody([{ Deleted: imageDeleteMatch[1] ?? '' }]));
+        return;
+      }
       const inspectMatch = /^\/containers\/([a-f0-9]{64})\/json$/u.exec(pathname);
       if (method === 'GET' && inspectMatch) {
         socket.end(
@@ -93,7 +190,15 @@ export async function startDockerFixture(
             Id: inspectMatch[1],
             Name: '/fixture',
             Config: { Tty: false },
-            State: { Status: 'running' },
+            State: {
+              Status: state.running ? 'running' : 'exited',
+              Running: state.running,
+              Paused: false,
+              Restarting: false,
+              ExitCode: state.running ? 0 : 137,
+              FinishedAt: state.running ? '0001-01-01T00:00:00Z' : '2026-01-01T00:00:00Z',
+              Health: null,
+            },
           }),
         );
         return;
@@ -107,10 +212,10 @@ export async function startDockerFixture(
         socket.end(frames);
         return;
       }
-      if (
-        method === 'POST' &&
-        /^\/containers\/[a-f0-9]{64}\/(start|stop|restart)$/u.test(pathname)
-      ) {
+      const actionMatch = /^\/containers\/[a-f0-9]{64}\/(start|stop|restart)$/u.exec(pathname);
+      if (method === 'POST' && actionMatch) {
+        // Mirror the engine: stop leaves the container exited, start/restart leave it running.
+        state.running = actionMatch[1] !== 'stop';
         socket.end(emptyResponse(204));
         return;
       }
@@ -132,6 +237,8 @@ export async function startDockerFixture(
     socketPath,
     endpoint: `unix://${socketPath}`,
     containers,
+    images,
+    removedImages,
     stop: async () => {
       await new Promise<void>((resolve) => {
         server.close(() => {

@@ -79,6 +79,58 @@ export interface ContainerInspect {
   Labels: Record<string, string>;
 }
 
+export interface ContainerStats {
+  cpuPercent: number;
+  memory: {
+    usedBytes: number;
+    limitBytes: number;
+    percent: number;
+  };
+  network: {
+    rxBytes: number;
+    txBytes: number;
+  };
+  blockIo: {
+    readBytes: number;
+    writeBytes: number;
+  };
+  pids: number;
+}
+
+export interface ContainerStatsSample {
+  read: string;
+  cpu_stats: {
+    cpu_usage: { total_usage: number };
+    system_cpu_usage?: number;
+    online_cpus?: number;
+  };
+  precpu_stats: {
+    cpu_usage: { total_usage: number };
+    system_cpu_usage?: number;
+    online_cpus?: number;
+  };
+  memory_stats: {
+    usage?: number;
+    limit?: number;
+    stats?: { inactive_file?: number };
+  };
+  networks?: Record<string, { rx_bytes?: number; tx_bytes?: number }>;
+  blkio_stats?: {
+    io_service_bytes_recursive?: { op?: string; value?: number }[] | null;
+  };
+  pids_stats?: { current?: number };
+}
+
+export interface ImageSummary {
+  Id: string;
+  RepoTags?: string[] | null;
+  RepoDigests?: string[] | null;
+  Size: number;
+  Created: number;
+  Containers?: number;
+  Labels?: Record<string, string> | null;
+}
+
 export type ContainerState =
   'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead' | 'unknown';
 
@@ -531,6 +583,8 @@ export async function stopContainer(
     endpoint,
     'POST',
     `/containers/${containerId}/stop?t=${String(timeoutSec)}`,
+    undefined,
+    timeoutSec * 1000 + DOCKER_REQUEST_TIMEOUT_MS,
   );
   if (status !== 204) {
     throw new DockerApiError(status, `Failed to stop container: ${String(status)}.`);
@@ -549,6 +603,8 @@ export async function restartContainer(
     endpoint,
     'POST',
     `/containers/${containerId}/restart?t=${String(timeoutSec)}`,
+    undefined,
+    timeoutSec * 1000 + DOCKER_REQUEST_TIMEOUT_MS,
   );
   if (status !== 204) {
     throw new DockerApiError(status, `Failed to restart container: ${String(status)}.`);
@@ -583,4 +639,90 @@ export function socketExists(socketPath: string): boolean {
 
 export function verifyDockerSocket(endpoint: DockerEndpoint): Promise<DockerVersion> {
   return dockerVersion(endpoint);
+}
+
+export function systemInfo(endpoint: DockerEndpoint): Promise<Record<string, unknown>> {
+  return dockerRequest(endpoint, 'GET', '/info').then(
+    ({ body }) => body as Record<string, unknown>,
+  );
+}
+
+export async function listImages(endpoint: DockerEndpoint, all = true): Promise<ImageSummary[]> {
+  const { body } = await dockerRequest(endpoint, 'GET', `/images/json?all=${all ? '1' : '0'}`);
+  if (!Array.isArray(body)) return [];
+  return body as ImageSummary[];
+}
+
+export async function removeImage(
+  endpoint: DockerEndpoint,
+  imageId: string,
+  force = false,
+): Promise<void> {
+  if (!/^sha256:[a-f0-9]{64}$/u.test(imageId)) {
+    throw new DockerApiError(400, 'Invalid image reference format.');
+  }
+  const { status } = await dockerRequest(
+    endpoint,
+    'DELETE',
+    `/images/${encodeURIComponent(imageId)}?force=${force ? '1' : '0'}&noprune=0`,
+  );
+  if (status !== 200 && status !== 204) {
+    throw new DockerApiError(status, `Failed to remove image: ${String(status)}.`);
+  }
+}
+
+export async function containerStats(
+  endpoint: DockerEndpoint,
+  containerId: string,
+): Promise<ContainerStats> {
+  if (!/^[a-f0-9]{64}$/u.test(containerId)) {
+    throw new DockerApiError(400, 'Invalid container ID format.');
+  }
+  const { body } = await dockerRequest(
+    endpoint,
+    'GET',
+    `/containers/${containerId}/stats?stream=0`,
+  );
+  return normalizeContainerStats(body as ContainerStatsSample);
+}
+
+export function normalizeContainerStats(sample: ContainerStatsSample): ContainerStats {
+  const cpuDelta =
+    sample.cpu_stats.cpu_usage.total_usage - sample.precpu_stats.cpu_usage.total_usage;
+  const systemDelta =
+    (sample.cpu_stats.system_cpu_usage ?? 0) - (sample.precpu_stats.system_cpu_usage ?? 0);
+  const onlineCpus = sample.cpu_stats.online_cpus ?? sample.precpu_stats.online_cpus ?? 1;
+  const cpuPercent =
+    systemDelta > 0 && cpuDelta > 0
+      ? Number(((cpuDelta / systemDelta) * onlineCpus * 100).toFixed(2))
+      : 0;
+
+  const rawUsage = sample.memory_stats.usage ?? 0;
+  const inactiveFile = sample.memory_stats.stats?.inactive_file ?? 0;
+  const usedBytes = Math.max(0, rawUsage - inactiveFile);
+  const limitBytes = sample.memory_stats.limit ?? 0;
+  const memoryPercent = limitBytes > 0 ? Number(((usedBytes / limitBytes) * 100).toFixed(2)) : 0;
+
+  let rxBytes = 0;
+  let txBytes = 0;
+  for (const iface of Object.values(sample.networks ?? {})) {
+    rxBytes += iface.rx_bytes ?? 0;
+    txBytes += iface.tx_bytes ?? 0;
+  }
+
+  let readBytes = 0;
+  let writeBytes = 0;
+  for (const entry of sample.blkio_stats?.io_service_bytes_recursive ?? []) {
+    const op = entry.op?.toLowerCase();
+    if (op === 'read') readBytes += entry.value ?? 0;
+    if (op === 'write') writeBytes += entry.value ?? 0;
+  }
+
+  return {
+    cpuPercent,
+    memory: { usedBytes, limitBytes, percent: memoryPercent },
+    network: { rxBytes, txBytes },
+    blockIo: { readBytes, writeBytes },
+    pids: sample.pids_stats?.current ?? 0,
+  };
 }

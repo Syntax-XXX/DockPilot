@@ -50,6 +50,15 @@ const validMinimalInputs: Record<McpToolName, Record<string, unknown>> = {
     containerId: sampleContainerId,
     justification: 'retire the container',
   },
+  dockpilot_get_container_stats: { containerId: sampleContainerId },
+  dockpilot_run_host_diagnostics: { hostId: sampleUuid },
+  dockpilot_list_images: { hostId: sampleUuid },
+  dockpilot_request_image_removal: {
+    hostId: sampleUuid,
+    imageId: `sha256:${'b'.repeat(64)}`,
+    justification: 'reclaim the image',
+  },
+  dockpilot_docker_summary: {},
 };
 
 function parses(schema: z.ZodType, input: unknown): boolean {
